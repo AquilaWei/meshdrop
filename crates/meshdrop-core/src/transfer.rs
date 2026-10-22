@@ -92,7 +92,6 @@ struct Active {
     cancel: CancellationToken,
 }
 struct Inner {
-    trust: TrustStore,
     active: HashMap<String, Active>,
 }
 #[derive(Clone)]
@@ -142,7 +141,6 @@ pub async fn serve(
         },
         config,
         inner: Arc::new(Mutex::new(Inner {
-            trust: TrustStore::load(&directory.join("trust.json"))?,
             active: HashMap::new(),
         })),
         directory,
@@ -195,12 +193,18 @@ async fn peers(
     State(s): State<ServerState>,
     Extension(peer): Extension<String>,
 ) -> ApiResult<HashMap<String, String>> {
-    let inner = s.inner.lock().map_err(api_error)?;
-    authorized(&inner, &peer).map_err(api_error)?;
-    Ok(Json(inner.trust.0.clone().into_iter().collect()))
+    authorized(&s, &peer).map_err(api_error)?;
+    Ok(Json(
+        TrustStore::load(&s.directory.join("trust.json"))
+            .map_err(api_error)?
+            .0
+            .into_iter()
+            .collect(),
+    ))
 }
-fn authorized(inner: &Inner, peer: &str) -> Result<()> {
-    if !inner.trust.0.values().any(|p| p == peer) {
+fn authorized(state: &ServerState, peer: &str) -> Result<()> {
+    let trust = TrustStore::load(&state.directory.join("trust.json"))?;
+    if !trust.0.values().any(|p| p == peer) {
         bail!("unpaired device");
     }
     Ok(())
@@ -245,10 +249,8 @@ async fn pair(
     )
     .await
     .map_err(api_error)?;
-    s.inner
-        .lock()
+    TrustStore::load(&s.directory.join("trust.json"))
         .map_err(api_error)?
-        .trust
         .remember(&s.directory.join("trust.json"), &request.address, &peer)
         .map_err(api_error)?;
     Ok(Json(s.info))
@@ -260,8 +262,7 @@ async fn offer(
 ) -> ApiResult<String> {
     version(request.version).map_err(api_error)?;
     {
-        let inner = s.inner.lock().map_err(api_error)?;
-        authorized(&inner, &peer).map_err(api_error)?;
+        authorized(&s, &peer).map_err(api_error)?;
     }
     if request.files.is_empty() || request.files.len() > 128 {
         return Err(api_error("offer must contain 1..128 files"));
