@@ -74,6 +74,8 @@ impl Controller {
             notices,
             view: json!({"devices":[],"problems":[],"invitations":[],"transfers":[],"error":null}),
             pending: Default::default(),
+            cancellations: Default::default(),
+            selected_files: Vec::new(),
             manual: Vec::new(),
         };
         tokio::spawn(async move {
@@ -130,6 +132,8 @@ struct Actor {
     view: Value,
     pending: std::collections::HashMap<String, Invitation>,
     manual: Vec<String>,
+    cancellations: std::collections::HashMap<String, CancellationToken>,
+    selected_files: Vec<PathBuf>,
 }
 struct Job {
     operation: String,
@@ -144,15 +148,18 @@ impl Actor {
         mut progress: mpsc::Receiver<Progress>,
     ) {
         let mut jobs = tokio::task::JoinSet::new();
+        let (updates, mut update_rx) = mpsc::channel::<Progress>(16);
         let mut expiry = tokio::time::interval(Duration::from_millis(250));
         loop {
             tokio::select! {
                 _ = self.stop.cancelled() => break,
-                Some(request) = requests.recv() => self.command(request, &mut jobs),
+                Some(request) = requests.recv() => self.command(request, &mut jobs, &updates),
                 Some(invitation) = invitations.recv() => self.invite(invitation).await,
-                Some(_event) = progress.recv() => {},
+                Some(event) = progress.recv() => self.progress(event),
+                Some(event) = update_rx.recv() => self.progress(event),
                 Some(result) = jobs.join_next() => match result {
                     Ok(job) => {
+                        if let Some(id) = job.operation.strip_prefix("send:") { self.sent(id, &job.result); }
                         if let Ok(value) = &job.result && job.operation == "refresh" {
                             self.view["devices"] = value["devices"].clone();
                             self.view["problems"] = value["problems"].clone();
@@ -169,8 +176,15 @@ impl Actor {
         }
         self.stop.cancel();
         self.pending.clear();
-        jobs.abort_all();
-        while jobs.join_next().await.is_some() {}
+        if tokio::time::timeout(Duration::from_secs(3), async {
+            while jobs.join_next().await.is_some() {}
+        })
+        .await
+        .is_err()
+        {
+            jobs.abort_all();
+            while jobs.join_next().await.is_some() {}
+        }
     }
     async fn invite(&mut self, invitation: Invitation) {
         let id = invitation.transfer.clone();
@@ -191,7 +205,12 @@ impl Actor {
         }
         self.pending.insert(id, invitation);
     }
-    fn command(&mut self, request: Request, jobs: &mut tokio::task::JoinSet<Job>) {
+    fn command(
+        &mut self,
+        request: Request,
+        jobs: &mut tokio::task::JoinSet<Job>,
+        updates: &mpsc::Sender<Progress>,
+    ) {
         let Request {
             operation,
             payload,
@@ -199,6 +218,33 @@ impl Actor {
         } = request;
         let immediate = match operation.as_str() {
             "snapshot" => Some(self.snapshot()),
+            "select_files" => Some((|| {
+                self.selected_files = serde_json::from_value(payload.clone())?;
+                self.view["selected_files"] = json!(
+                    self.selected_files
+                        .iter()
+                        .map(|path| path.file_name().unwrap_or_default().to_string_lossy())
+                        .collect::<Vec<_>>()
+                );
+                Ok(self.view["selected_files"].clone())
+            })()),
+            "receive_directory" => Some(Ok(json!(self.session.config.receive_directory))),
+            "notice_error" => {
+                self.view["error"] = payload.clone();
+                Some(Ok(Value::Null))
+            }
+            "cancel" => Some((|| {
+                let id = text(&payload, "id")?;
+                self.cancellations
+                    .get(id)
+                    .context("transfer is no longer active")?
+                    .cancel();
+                if let Some(row) = self.transfer(id) {
+                    row["status"] = json!("cancelled");
+                }
+                Ok(Value::Null)
+            })()),
+            "send" => Some(self.send(payload.clone(), jobs, updates)),
             "add_device" => Some((|| {
                 let input = text(&payload, "address")?.to_owned();
                 meshdrop_core::discovery::parse_address(&input)?;
@@ -213,6 +259,11 @@ impl Actor {
                 let accepted = payload["accept"]
                     .as_bool()
                     .context("missing accept decision")?;
+                if accepted && let transfer::InvitationKind::Files(files) = &invitation.kind {
+                    self.cancellations
+                        .insert(id.into(), invitation.cancel.clone());
+                    self.add_transfer(id, "receive", &invitation.peer_name, files, "accepted");
+                }
                 invitation
                     .decision
                     .send(if accepted {
@@ -241,6 +292,123 @@ impl Actor {
             let result = tokio::select! { result = work => result, _ = stop.cancelled() => Err(anyhow::anyhow!("application closing")) };
             Job { operation, result, reply }
         });
+    }
+    fn transfer(&mut self, id: &str) -> Option<&mut Value> {
+        self.view["transfers"]
+            .as_array_mut()?
+            .iter_mut()
+            .find(|row| row["id"] == id)
+    }
+    fn add_transfer(
+        &mut self,
+        id: &str,
+        direction: &str,
+        peer: &str,
+        files: &[transfer::FileOffer],
+        status: &str,
+    ) {
+        let files = files
+            .iter()
+            .map(|file| json!({"name":file.name,"bytes":0,"total":file.size,"status":"waiting"}))
+            .collect::<Vec<_>>();
+        self.view["transfers"]
+            .as_array_mut()
+            .expect("array")
+            .push(json!({"id":id,"direction":direction,"peer":peer,"files":files,"status":status}));
+    }
+    fn progress(&mut self, event: Progress) {
+        use transfer::ProgressStatus;
+        if let Some(row) = self.transfer(&event.transfer) {
+            if row["status"] == "cancelled" || row["status"] == "complete" {
+                return;
+            }
+            if let Some(file) = row["files"]
+                .as_array_mut()
+                .expect("files")
+                .iter_mut()
+                .find(|file| file["name"] == event.name)
+            {
+                file["bytes"] = json!(event.bytes);
+                file["total"] = json!(event.total);
+                file["status"] = json!(event.status);
+            }
+            row["status"] = json!("accepted");
+            if event.status == ProgressStatus::Failed {
+                row["status"] = json!("failed");
+                row["error"] = json!(event.detail);
+            } else if row["files"]
+                .as_array()
+                .expect("files")
+                .iter()
+                .all(|file| file["status"] == "complete")
+            {
+                row["status"] = json!("complete");
+            }
+        }
+    }
+    fn sent(&mut self, id: &str, result: &Result<Value>) {
+        if let Some(row) = self.transfer(id) {
+            match result {
+                Ok(lengths) => {
+                    row["status"] = json!("complete");
+                    for file in row["files"].as_array_mut().expect("files") {
+                        file["total"] = lengths[file["name"].as_str().unwrap_or_default()].clone();
+                        file["bytes"] = file["total"].clone();
+                        file["status"] = json!("complete");
+                    }
+                }
+                Err(error) => {
+                    let error = format!("{error:#}");
+                    row["status"] = json!(error_status(&error));
+                    row["error"] = json!(error);
+                }
+            }
+        }
+        self.cancellations.remove(id);
+    }
+    fn send(
+        &mut self,
+        payload: Value,
+        jobs: &mut tokio::task::JoinSet<Job>,
+        updates: &mpsc::Sender<Progress>,
+    ) -> Result<Value> {
+        let targets: Vec<String> = serde_json::from_value(payload["targets"].clone())?;
+        if targets.is_empty() || self.selected_files.is_empty() {
+            bail!("select paired devices and files first");
+        }
+        let mut ids = Vec::new();
+        for target in targets {
+            let id = uuid::Uuid::new_v4().to_string();
+            let token = self.stop.child_token();
+            self.cancellations.insert(id.clone(), token.clone());
+            let paths = self.selected_files.clone();
+            let files = paths
+                .iter()
+                .map(|path| transfer::FileOffer {
+                    name: path
+                        .file_name()
+                        .unwrap_or_default()
+                        .to_string_lossy()
+                        .into_owned(),
+                    size: 0,
+                    sha256: String::new(),
+                })
+                .collect::<Vec<_>>();
+            self.add_transfer(&id, "send", &target, &files, "waiting");
+            let session = self.session.clone();
+            let updates = updates.clone();
+            ids.push(id.clone());
+            jobs.spawn(async move {
+                let result = session.send(&target, paths, &id, updates, token).await;
+                let (reply, _) = oneshot::channel();
+                Job {
+                    operation: format!("send:{id}"),
+                    result,
+                    reply,
+                }
+            });
+        }
+        Ok(json!(ids))
     }
     fn snapshot(&self) -> Result<Value> {
         let mut view = self.view.clone();
@@ -272,6 +440,51 @@ impl Session {
         let path = self.directory.join("trust.json");
         tokio::task::spawn_blocking(move || meshdrop_core::identity::TrustStore::load(&path))
             .await?
+    }
+    async fn send(
+        &self,
+        target: &str,
+        paths: Vec<PathBuf>,
+        id: &str,
+        updates: mpsc::Sender<Progress>,
+        cancel: CancellationToken,
+    ) -> Result<Value> {
+        let trust = self.trust().await?;
+        let pin = trust
+            .0
+            .get(target)
+            .context("unpaired device; confirm pairing before sending")?
+            .clone();
+        let client = transfer::Client::new(
+            target,
+            &self.identity,
+            Some(pin),
+            Duration::from_secs(self.config.invitation_timeout_seconds + 5),
+        )?
+        .with_name(self.config.name.clone());
+        let (tx, mut rx) = mpsc::channel::<Progress>(16);
+        let sending = client.send(&paths, tx, cancel);
+        tokio::pin!(sending);
+        // Drain updates before consuming completion, preserving final progress ordering.
+        let result = loop {
+            tokio::select! {
+                biased;
+                Some(mut event) = rx.recv() => { event.transfer = id.into(); updates.send(event).await.context("frontend progress disconnected")?; },
+                result = &mut sending => break result,
+            }
+        };
+        result?;
+        let mut sizes = serde_json::Map::new();
+        for path in &paths {
+            sizes.insert(
+                path.file_name()
+                    .context("file has no name")?
+                    .to_string_lossy()
+                    .into_owned(),
+                json!(tokio::fs::metadata(path).await?.len()),
+            );
+        }
+        Ok(Value::Object(sizes))
     }
     async fn execute(&self, operation: &str, payload: Value, manual: Vec<String>) -> Result<Value> {
         use meshdrop_core::{
@@ -395,6 +608,17 @@ impl Session {
         }
     }
 }
+fn error_status(error: &str) -> &'static str {
+    if error.contains("cancel") {
+        "cancelled"
+    } else if error.contains("timed out") || error.contains("timeout") {
+        "timed_out"
+    } else if error.contains("reject") {
+        "rejected"
+    } else {
+        "failed"
+    }
+}
 fn advertised_address(port: u16) -> Result<String> {
     let socket = std::net::UdpSocket::bind("0.0.0.0:0")?;
     socket.connect("192.0.2.1:9")?;
@@ -432,7 +656,10 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         std::fs::write(
             directory.path().join("config.toml"),
-            format!("port = 0\nproviders = {providers}\nname = '{name}'\n"),
+            format!(
+                "port = 0\nproviders = {providers}\nname = '{name}'\nreceive_directory = '{}'\n",
+                directory.path().join("received").display()
+            ),
         )
         .unwrap();
         let (tx, rx) = mpsc::channel(16);
@@ -444,6 +671,120 @@ mod tests {
     async fn address(controller: &Controller) -> String {
         let snapshot = controller.call("snapshot", Value::Null).await.unwrap();
         format!("127.0.0.1:{}", snapshot["port"])
+    }
+    async fn paired_profiles() -> (
+        tempfile::TempDir,
+        Controller,
+        tempfile::TempDir,
+        Controller,
+        mpsc::Receiver<Notice>,
+    ) {
+        let (a, first, _notices_a) = profile("First", "[]").await;
+        let (b, second, notices_b) = profile("Second", "[]").await;
+        let first_id = Identity::load(a.path()).unwrap();
+        let second_id = Identity::load(b.path()).unwrap();
+        meshdrop_core::identity::TrustStore::default()
+            .remember(
+                &a.path().join("trust.json"),
+                &address(&second).await,
+                &second_id.fingerprint(),
+            )
+            .unwrap();
+        meshdrop_core::identity::TrustStore::default()
+            .remember(
+                &b.path().join("trust.json"),
+                &address(&first).await,
+                &first_id.fingerprint(),
+            )
+            .unwrap();
+        (a, first, b, second, notices_b)
+    }
+    async fn wait_status(controller: &Controller, status: &str) -> Value {
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                let view = controller.call("snapshot", Value::Null).await.unwrap();
+                if view["transfers"][0]["status"] == status {
+                    return view;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap()
+    }
+    #[tokio::test]
+    async fn accepted_desktop_transfer_reports_verified_completion_and_lands_file() {
+        let (a, first, b, second, mut notices) = paired_profiles().await;
+        let source = a.path().join("video.txt");
+        std::fs::write(&source, b"desktop payload").unwrap();
+        first.call("select_files", json!([source])).await.unwrap();
+        first
+            .call("send", json!({"targets":[address(&second).await]}))
+            .await
+            .unwrap();
+        notices.recv().await.unwrap();
+        let view = second.call("snapshot", Value::Null).await.unwrap();
+        assert_eq!(
+            view["invitations"][0]["detail"]["files"][0]["name"],
+            "video.txt"
+        );
+        second
+            .call(
+                "decide",
+                json!({"id":view["invitations"][0]["id"],"accept":true}),
+            )
+            .await
+            .unwrap();
+        let sent = wait_status(&first, "complete").await;
+        let received = wait_status(&second, "complete").await;
+        assert_eq!(sent["transfers"][0]["files"][0]["bytes"], 15);
+        assert_eq!(received["transfers"][0]["files"][0]["status"], "complete");
+        assert_eq!(
+            std::fs::read(b.path().join("received/video.txt")).unwrap(),
+            b"desktop payload"
+        );
+        first.shutdown().await;
+        second.shutdown().await;
+    }
+    #[tokio::test]
+    async fn rejected_desktop_transfer_reports_rejection_without_saving_content() {
+        let (a, first, b, second, mut notices) = paired_profiles().await;
+        let source = a.path().join("video.txt");
+        std::fs::write(&source, b"desktop payload").unwrap();
+        first.call("select_files", json!([source])).await.unwrap();
+        first
+            .call("send", json!({"targets":[address(&second).await]}))
+            .await
+            .unwrap();
+        notices.recv().await.unwrap();
+        let view = second.call("snapshot", Value::Null).await.unwrap();
+        second
+            .call(
+                "decide",
+                json!({"id":view["invitations"][0]["id"],"accept":false}),
+            )
+            .await
+            .unwrap();
+        wait_status(&first, "rejected").await;
+        assert!(!b.path().join("received/video.txt").exists());
+        first.shutdown().await;
+        second.shutdown().await;
+    }
+    #[tokio::test]
+    async fn cancelling_waiting_desktop_transfer_reports_cancellation() {
+        let (a, first, _b, second, mut notices) = paired_profiles().await;
+        let source = a.path().join("video.txt");
+        std::fs::write(&source, b"desktop payload").unwrap();
+        first.call("select_files", json!([source])).await.unwrap();
+        let ids = first
+            .call("send", json!({"targets":[address(&second).await]}))
+            .await
+            .unwrap();
+        notices.recv().await.unwrap();
+        first.call("cancel", json!({"id":ids[0]})).await.unwrap();
+        wait_status(&first, "cancelled").await;
+        first.shutdown().await;
+        second.shutdown().await;
     }
     #[tokio::test]
     async fn discovery_retains_device_when_optional_provider_reports_problem() {

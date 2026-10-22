@@ -9,6 +9,8 @@
 <section id="fingerprint-error" role="alert" hidden><h2>Fingerprint mismatch</h2><p>The stored identity and the peer certificate differ. Connection refused. Verify the device locally before changing trust.</p></section>
 <section><div class="section-heading"><h2>Devices</h2><button id="refresh">Refresh</button></div><form id="manual"><label for="address">Add host:port or QR content</label><div class="input-row"><input id="address" required placeholder="192.168.1.20:9843"><button>Add device</button></div></form><ul id="problems" aria-label="Discovery diagnostics"></ul><div id="devices"></div></section>
 <section id="outgoing-pair" role="dialog" aria-label="Confirm pairing" hidden><h2>Compare the code on both devices</h2><p id="pair-name"></p><strong id="pair-code" class="code"></strong><p>Only confirm when the six digits match.</p><button id="pair-confirm">Codes match — pair</button><button id="pair-dismiss" class="secondary">Cancel</button><p id="pair-status" role="status"></p></section>
+<section><div class="section-heading"><h2>Send files</h2><button id="pick-files">Choose files…</button></div><p id="selected-files">No files selected</p><button id="send">Send to selected devices</button></section>
 <section><h2>Incoming requests</h2><div id="invitations"></div></section>
+<section><div class="section-heading"><h2>Transfers</h2><button id="open-folder" class="secondary">Open receive folder</button></div><div id="transfers"></div></section>
 </main><footer>Receive service runs while this window is open. Closing the window stops it safely.</footer>
 </body></html>

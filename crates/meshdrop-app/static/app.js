@@ -82,6 +82,28 @@ function invitations(items) {
     $('#invitations').append(box);
   }
 }
+let lastTransfers = '';
+function transfers(items) {
+  const signature = JSON.stringify(items);
+  if (signature === lastTransfers) return;
+  lastTransfers = signature; $('#transfers').replaceChildren();
+  for (const transfer of items) {
+    const box = element('div', undefined, 'transfer'); box.dataset.id = transfer.id;
+    box.append(element('h3', `${transfer.direction === 'send' ? 'Sending to' : 'Receiving from'} ${transfer.peer}`));
+    const status = element('p', transfer.status.replaceAll('_',' '), 'transfer-status'); box.append(status);
+    for (const file of transfer.files) {
+      const percent = file.status === 'complete' ? 100 : file.total ? Math.floor(100*file.bytes/file.total) : 0;
+      box.append(element('p', `${file.name} · ${percent}% · ${file.bytes}/${file.total} bytes`));
+      const bar = element('progress'); bar.max = 100; bar.value = percent; bar.setAttribute('aria-label', file.name); box.append(bar);
+    }
+    if (transfer.error) box.append(element('p', transfer.error));
+    if (['waiting','accepted'].includes(transfer.status)) {
+      const cancel = element('button','Cancel','secondary');
+      cancel.addEventListener('click', async () => { try { await act('cancel',{id:transfer.id}); await poll(); } catch (_) { /* rendered */ } }); box.append(cancel);
+    }
+    $('#transfers').append(box);
+  }
+}
 function drawQR(matrix) {
   const canvas = $('#qr');
   const scale = 4, quiet = 4;
@@ -97,7 +119,8 @@ async function poll() {
     $('#fingerprint').textContent = state.fingerprint;
     $('#qr-content').textContent = state.qr_content;
     $('#service-state').textContent = `Receiving on port ${state.port}`;
-    drawQR(state.qr); devices(state.devices); invitations(state.invitations);
+    drawQR(state.qr); devices(state.devices); invitations(state.invitations); transfers(state.transfers);
+    $('#selected-files').textContent = (state.selected_files || []).join(', ') || 'No files selected';
     $('#problems').replaceChildren(...state.problems.map(problem => element('li', `${problem.provider}: ${problem.error}`)));
     if (state.error) failure(state.error);
   } catch (error) { failure(error); }
@@ -114,3 +137,7 @@ $('#pair-confirm').addEventListener('click', async () => {
   catch (_) { $('#pair-status').textContent = 'Pairing failed'; }
 });
 poll(); refresh(); setInterval(poll, 300); setInterval(refresh, 8000);
+
+$('#pick-files').addEventListener('click', async () => { try { await act('pick_files'); await poll(); } catch (_) { /* rendered */ } });
+$('#send').addEventListener('click', async () => { try { await act('send',{targets:[...selected]}); await poll(); } catch (_) { /* rendered */ } });
+$('#open-folder').addEventListener('click', async () => { try { await act('open_receive_directory'); } catch (_) { /* rendered */ } });

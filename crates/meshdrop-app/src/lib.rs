@@ -2,13 +2,42 @@
 pub mod service;
 use service::Controller;
 use tauri::Manager;
+use tauri_plugin_dialog::DialogExt;
+use tauri_plugin_notification::NotificationExt;
+use tauri_plugin_opener::OpenerExt;
 
 #[tauri::command]
 async fn desktop_request(
+    app: tauri::AppHandle,
     state: tauri::State<'_, Controller>,
     operation: String,
     payload: serde_json::Value,
 ) -> Result<serde_json::Value, String> {
+    if operation == "pick_files" {
+        let paths = tokio::task::spawn_blocking(move || app.dialog().file().blocking_pick_files())
+            .await
+            .map_err(|e| e.to_string())?;
+        if let Some(paths) = paths {
+            let paths = paths
+                .into_iter()
+                .map(|path| path.into_path().map_err(|e| e.to_string()))
+                .collect::<Result<Vec<_>, _>>()?;
+            return state.call("select_files", serde_json::json!(paths)).await;
+        }
+        return Ok(serde_json::Value::Null);
+    }
+    if operation == "open_receive_directory" {
+        let path = state
+            .call("receive_directory", serde_json::Value::Null)
+            .await?;
+        app.opener()
+            .open_path(
+                path.as_str().ok_or("invalid receive directory")?,
+                None::<&str>,
+            )
+            .map_err(|e| e.to_string())?;
+        return Ok(serde_json::Value::Null);
+    }
     state.call(&operation, payload).await
 }
 /// Starts the native shell; setup errors are shown by Tauri and abort startup.
@@ -23,10 +52,25 @@ pub fn run() {
                 service::state_directory()?,
                 notices,
             ))?;
-            app.manage(controller);
+            app.manage(controller.clone());
+            let handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
                 while let Some(event) = events.recv().await {
-                    eprintln!("desktop notice: {event:?}");
+                    let service::Notice::Invitation(body) = event;
+                    if let Err(error) = handle
+                        .notification()
+                        .builder()
+                        .title("meshdrop invitation")
+                        .body(body)
+                        .show()
+                    {
+                        let _ = controller
+                            .call(
+                                "notice_error",
+                                serde_json::json!(format!("System notification: {error}")),
+                            )
+                            .await;
+                    }
                 }
             });
             Ok(())
