@@ -159,35 +159,94 @@ pub async fn serve(
         .layer(DefaultBodyLimit::max(64 * 1024))
         .with_state(state.clone());
     let acceptor = tokio_rustls::TlsAcceptor::from(Arc::new(tls));
+    let incoming = futures_util::stream::unfold(listener, |listener| async move {
+        let accepted = listener.accept().await;
+        Some((accepted, listener))
+    });
+    let stop = shutdown.clone();
+    connection_loop(
+        incoming,
+        move |stream, address| {
+            let acceptor = acceptor.clone();
+            let router = router.clone();
+            let stop = stop.clone();
+            let config = state.config.clone();
+            async move {
+                if !config.allows(address.ip()) {
+                    eprintln!("source network denied: {}", address.ip());
+                    return Ok(());
+                }
+                let connection = async {
+                    let stream =
+                        tokio::time::timeout(Duration::from_secs(10), acceptor.accept(stream))
+                            .await??;
+                    let cert = stream
+                        .get_ref()
+                        .1
+                        .peer_certificates()
+                        .and_then(|c| c.first())
+                        .context("missing client certificate")?;
+                    let peer = fingerprint(cert.as_ref());
+                    let service = hyper_util::service::TowerToHyperService::new(
+                        router.layer(Extension(peer)),
+                    );
+                    hyper::server::conn::http1::Builder::new()
+                        .serve_connection(hyper_util::rt::TokioIo::new(stream), service)
+                        .await?;
+                    Ok::<_, anyhow::Error>(())
+                };
+                tokio::select! { result = connection => result, _ = stop.cancelled() => Ok(()) }
+            }
+        },
+        shutdown,
+    )
+    .await
+}
+// Injectable accept events keep rare descriptor/socket failures testable without
+// changing process limits or modifying any host network configuration.
+async fn connection_loop<S, F, Fut>(
+    incoming: S,
+    mut connection: F,
+    shutdown: CancellationToken,
+) -> Result<()>
+where
+    S: futures_util::Stream<Item = std::io::Result<(tokio::net::TcpStream, std::net::SocketAddr)>>
+        + Send,
+    F: FnMut(tokio::net::TcpStream, std::net::SocketAddr) -> Fut + Send,
+    Fut: std::future::Future<Output = Result<()>> + Send + 'static,
+{
+    futures_util::pin_mut!(incoming);
     let mut tasks = tokio::task::JoinSet::new();
     loop {
         tokio::select! {
-         _ = shutdown.cancelled() => break,
-         result = tasks.join_next(), if !tasks.is_empty() => { result.context("connection task missing")???; },
-         accepted = listener.accept() => {
-          let (stream, address) = accepted?;
-          if !state.config.allows(address.ip()) { eprintln!("source network denied: {}", address.ip()); continue; }
-          let acceptor = acceptor.clone(); let router = router.clone(); let stop = shutdown.clone();
-          tasks.spawn(async move {
-           let connection = async {
-            let stream = tokio::time::timeout(Duration::from_secs(10), acceptor.accept(stream)).await??;
-            let cert = stream.get_ref().1.peer_certificates().and_then(|c| c.first()).context("missing client certificate")?;
-            let peer = fingerprint(cert.as_ref());
-            let service = hyper_util::service::TowerToHyperService::new(router.layer(Extension(peer)));
-            hyper::server::conn::http1::Builder::new().serve_connection(hyper_util::rt::TokioIo::new(stream), service).await?;
-            Ok::<_, anyhow::Error>(())
-           };
-           tokio::select! { result = connection => { if let Err(error) = result { eprintln!("connection failed: {error:#}"); } }, _ = stop.cancelled() => {} }
-           Ok::<_, anyhow::Error>(())
-          });
-         }
+            _ = shutdown.cancelled() => break,
+            result = tasks.join_next(), if !tasks.is_empty() => { if let Some(result) = result { report_connection(result); } },
+            accepted = incoming.next() => {
+                let Some(accepted) = accepted else { break; };
+                match accepted {
+                    Ok((stream,address)) => { tasks.spawn(connection(stream,address)); }
+                    Err(error) => {
+                        eprintln!("accept failed; retrying: {error}");
+                        // Avoid spinning under descriptor exhaustion while remaining stoppable.
+                        tokio::select! { _ = shutdown.cancelled() => break, _ = tokio::time::sleep(Duration::from_millis(100)) => {} }
+                    }
+                }
+            }
         }
     }
     while let Some(task) = tasks.join_next().await {
-        task??;
+        report_connection(task);
     }
     Ok(())
 }
+fn report_connection(result: std::result::Result<Result<()>, tokio::task::JoinError>) {
+    match result {
+        Ok(Ok(())) => {}
+        Ok(Err(error)) => eprintln!("connection failed: {error:#}"),
+        Err(error) => eprintln!("connection task failed: {error}"),
+    }
+}
+
 async fn info(State(s): State<ServerState>) -> Json<Info> {
     Json(s.info)
 }
@@ -1135,5 +1194,59 @@ mod tests {
             )
         );
         h.finish().await;
+    }
+    async fn socket() -> tokio::net::TcpStream {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let (client, accepted) = tokio::join!(
+            tokio::net::TcpStream::connect(listener.local_addr().unwrap()),
+            listener.accept()
+        );
+        drop(client.unwrap());
+        accepted.unwrap().0
+    }
+    #[tokio::test]
+    async fn accept_error_does_not_prevent_next_connection() {
+        let incoming = futures_util::stream::iter(vec![
+            Err(std::io::Error::from(std::io::ErrorKind::ConnectionAborted)),
+            Ok((socket().await, "127.0.0.1:2".parse().unwrap())),
+        ]);
+        let (tx, mut rx) = mpsc::channel(1);
+        let result = connection_loop(
+            incoming,
+            move |_, _| {
+                let tx = tx.clone();
+                async move {
+                    tx.send(()).await.unwrap();
+                    Ok(())
+                }
+            },
+            CancellationToken::new(),
+        )
+        .await;
+        assert!(result.is_ok());
+        assert_eq!(rx.recv().await, Some(()));
+    }
+    #[tokio::test]
+    async fn panicked_connection_does_not_fail_listener() {
+        let incoming = futures_util::stream::iter(vec![
+            Ok((socket().await, "127.0.0.1:1".parse().unwrap())),
+            Ok((socket().await, "127.0.0.1:2".parse().unwrap())),
+        ]);
+        let (tx, mut rx) = mpsc::channel(1);
+        let result = connection_loop(
+            incoming,
+            move |_, address| {
+                let tx = tx.clone();
+                async move {
+                    assert_ne!(address.port(), 1, "injected connection panic");
+                    tx.send(()).await.unwrap();
+                    Ok(())
+                }
+            },
+            CancellationToken::new(),
+        )
+        .await;
+        assert!(result.is_ok());
+        assert_eq!(rx.recv().await, Some(()));
     }
 }
