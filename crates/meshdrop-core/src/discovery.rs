@@ -2,6 +2,7 @@
 use crate::{identity::Identity, transfer::Client};
 use anyhow::{Context, Result, bail};
 use async_trait::async_trait;
+use futures_util::{StreamExt, stream};
 use mdns_sd::{ServiceDaemon, ServiceEvent, ServiceInfo};
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeMap, sync::Arc, time::Duration};
@@ -121,18 +122,27 @@ async fn probe(address: String, identity: &Identity) -> Device {
         },
     }
 }
+// Keep socket and TLS work bounded even for large tailnets or peer lists.
+const PROBE_CONCURRENCY: usize = 16;
+async fn probe_addresses(addresses: Vec<String>, identity: &Identity) -> Vec<Device> {
+    stream::iter(addresses)
+        .map(|address| probe(address, identity))
+        .buffer_unordered(PROBE_CONCURRENCY)
+        .collect()
+        .await
+}
 #[async_trait]
 impl DiscoveryProvider for Manual {
     fn name(&self) -> &'static str {
         "manual"
     }
     async fn discover(&self) -> Result<DiscoveryReport> {
-        let mut devices = Vec::new();
-        for input in &self.addresses {
-            let (address, _) = parse_address(input)?;
-            devices.push(probe(address, &self.identity).await);
-        }
-        Ok(devices.into())
+        let addresses = self
+            .addresses
+            .iter()
+            .map(|input| parse_address(input).map(|(address, _)| address))
+            .collect::<Result<Vec<_>>>()?;
+        Ok(probe_addresses(addresses, &self.identity).await.into())
     }
 }
 /// Tailscale is optional and accessed via its documented local CLI JSON output.
@@ -160,14 +170,20 @@ impl DiscoveryProvider for Tailscale {
             );
         }
         let candidates = parse_tailscale_status(&output.stdout, self.port)?;
-        let mut devices = Vec::new();
-        for candidate in candidates {
-            if candidate.online {
-                devices.push(probe(candidate.address, &self.identity).await);
-            } else {
-                devices.push(candidate);
-            }
-        }
+        let (online, mut offline): (Vec<_>, Vec<_>) = candidates
+            .into_iter()
+            .partition(|candidate| candidate.online);
+        offline.extend(
+            probe_addresses(
+                online
+                    .into_iter()
+                    .map(|candidate| candidate.address)
+                    .collect(),
+                &self.identity,
+            )
+            .await,
+        );
+        let devices = offline;
         Ok(devices.into())
     }
 }
@@ -207,30 +223,35 @@ impl DiscoveryProvider for PeerList {
     }
     async fn discover(&self) -> Result<DiscoveryReport> {
         let mut report = DiscoveryReport::default();
-        for (address, pin) in &self.known {
-            let response = async {
-                Client::new(
-                    address,
-                    &self.identity,
-                    Some(pin.clone()),
-                    Duration::from_secs(3),
-                )?
-                .peers()
-                .await
-            }
-            .await;
-            match response {
-                Ok(peers) => {
-                    for candidate in peers.into_keys() {
-                        report.devices.push(probe(candidate, &self.identity).await);
-                    }
+        let responses = stream::iter(self.known.clone())
+            .map(|(address, pin)| async move {
+                let response = async {
+                    Client::new(
+                        &address,
+                        &self.identity,
+                        Some(pin.clone()),
+                        Duration::from_secs(3),
+                    )?
+                    .peers()
+                    .await
                 }
+                .await;
+                (address, response)
+            })
+            .buffer_unordered(PROBE_CONCURRENCY)
+            .collect::<Vec<_>>()
+            .await;
+        let mut candidates = std::collections::BTreeSet::new();
+        for (address, response) in responses {
+            match response {
+                Ok(peers) => candidates.extend(peers.into_keys()),
                 Err(error) => report.problems.push(DiscoveryProblem {
                     provider: self.name().into(),
                     error: format!("{address}: {error:#}"),
                 }),
             }
         }
+        report.devices = probe_addresses(candidates.into_iter().collect(), &self.identity).await;
         Ok(report)
     }
 }
@@ -298,5 +319,60 @@ impl DiscoveryProvider for Mdns {
         }
         self.daemon.stop_browse(SERVICE)?;
         Ok(devices.into())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[tokio::test]
+    async fn manual_probes_start_concurrently() {
+        let directory = tempfile::tempdir().unwrap();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap().to_string();
+        let provider = Manual {
+            addresses: vec![address; 3],
+            identity: Arc::new(Identity::load(directory.path()).unwrap()),
+        };
+        let discovering = tokio::spawn(async move { provider.discover().await });
+        let _connections = tokio::time::timeout(Duration::from_secs(1), async {
+            let first = listener.accept().await.unwrap();
+            let second = listener.accept().await.unwrap();
+            let third = listener.accept().await.unwrap();
+            (first, second, third)
+        })
+        .await
+        .expect("all probes should start before any two-second TLS timeout");
+        discovering.abort();
+    }
+    async fn accept_connections(
+        listener: &tokio::net::TcpListener,
+        count: usize,
+    ) -> Vec<tokio::net::TcpStream> {
+        let mut connections = Vec::new();
+        for _ in 0..count {
+            connections.push(listener.accept().await.unwrap().0);
+        }
+        connections
+    }
+    #[tokio::test]
+    async fn manual_probes_limit_open_connections_to_sixteen() {
+        let directory = tempfile::tempdir().unwrap();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let provider = Manual {
+            addresses: vec![listener.local_addr().unwrap().to_string(); 20],
+            identity: Arc::new(Identity::load(directory.path()).unwrap()),
+        };
+        let discovering = tokio::spawn(async move { provider.discover().await });
+        let _connections =
+            tokio::time::timeout(Duration::from_secs(1), accept_connections(&listener, 16))
+                .await
+                .unwrap();
+        assert!(
+            tokio::time::timeout(Duration::from_millis(100), listener.accept())
+                .await
+                .is_err()
+        );
+        discovering.abort();
     }
 }
