@@ -49,11 +49,15 @@ pub struct FileOffer {
 }
 #[derive(Serialize, Deserialize)]
 struct Offer {
+    #[serde(default)]
+    name: String,
     version: u32,
     files: Vec<FileOffer>,
 }
 #[derive(Serialize, Deserialize)]
 struct Pair {
+    #[serde(default)]
+    name: String,
     version: u32,
     address: String,
 }
@@ -67,6 +71,8 @@ pub enum Decision {
 #[derive(Debug)]
 pub struct Invitation {
     pub peer: String,
+    /// Untrusted display name; the certificate fingerprint remains the identity.
+    pub peer_name: String,
     pub kind: InvitationKind,
     pub decision: oneshot::Sender<Decision>,
     pub cancel: CancellationToken,
@@ -280,6 +286,7 @@ async fn authorized(state: &ServerState, peer: &str) -> Result<TrustStore> {
 async fn decide(
     s: &ServerState,
     peer: String,
+    peer_name: String,
     kind: InvitationKind,
     cancel: CancellationToken,
 ) -> Result<()> {
@@ -289,6 +296,7 @@ async fn decide(
         s.invitations
             .send(Invitation {
                 peer,
+                peer_name,
                 kind,
                 decision: tx,
                 cancel: cancel.clone(),
@@ -312,6 +320,7 @@ async fn pair(
     decide(
         &s,
         peer.clone(),
+        request.name,
         InvitationKind::Pair { code },
         CancellationToken::new(),
     )
@@ -347,6 +356,7 @@ async fn offer(
     decide(
         &s,
         peer.clone(),
+        request.name,
         InvitationKind::Files(request.files.clone()),
         cancel.clone(),
     )
@@ -521,6 +531,7 @@ async fn upload(
 /// A client uses mutual TLS and pins on every connection. Bootstrap clients may
 /// fetch metadata only; callers must compare QR pins or confirm the short code.
 pub struct Client {
+    name: String,
     http: reqwest::Client,
     upload_http: reqwest::Client,
     timeout: Duration,
@@ -551,6 +562,7 @@ impl Client {
         let upload_http = builder.build()?;
         let http = upload_http.clone();
         Ok(Self {
+            name: "meshdrop".into(),
             http,
             upload_http,
             timeout,
@@ -559,6 +571,11 @@ impl Client {
                 address.trim_start_matches("https://").trim_end_matches('/')
             ),
         })
+    }
+    /// Attaches a descriptive sender name without changing TLS authentication.
+    pub fn with_name(mut self, name: String) -> Self {
+        self.name = name;
+        self
     }
     async fn checked(response: reqwest::Response) -> Result<reqwest::Response> {
         if !response.status().is_success() {
@@ -597,6 +614,7 @@ impl Client {
                 .post(format!("{}/pair", self.address))
                 .timeout(self.timeout)
                 .json(&Pair {
+                    name: self.name.clone(),
                     version: VERSION,
                     address: address.into(),
                 })
@@ -663,6 +681,7 @@ impl Client {
             .post(format!("{}/offer", self.address))
             .timeout(self.timeout)
             .json(&Offer {
+                name: self.name.clone(),
                 version: VERSION,
                 files: files.clone(),
             })
@@ -911,6 +930,22 @@ mod tests {
         h.finish().await;
     }
     #[tokio::test]
+    async fn pairing_retains_sender_display_name() {
+        let mut h = Harness::new(10).await;
+        let http = h.client.http.clone();
+        let address = h.client.address.clone();
+        let request = tokio::spawn(async move {
+            http.post(format!("{address}/pair"))
+                .json(&serde_json::json!({"version": 1, "address": "sender:1234", "name": "Sender desktop"}))
+                .send().await.unwrap()
+        });
+        let invitation = h.invitations.recv().await.unwrap();
+        assert!(format!("{invitation:?}").contains("Sender desktop"));
+        invitation.decision.send(Decision::Accept).unwrap();
+        assert!(request.await.unwrap().status().is_success());
+        h.finish().await;
+    }
+    #[tokio::test]
     async fn one_invitation_authorizes_multiple_files() {
         let mut h = Harness::new(10).await;
         let second = h._directory.path().join("second");
@@ -934,6 +969,7 @@ mod tests {
                 .http
                 .post(format!("{}/offer", client.address))
                 .json(&Offer {
+                    name: "test sender".into(),
                     version: VERSION,
                     files: vec![FileOffer {
                         name: "raw".into(),
@@ -1009,6 +1045,7 @@ mod tests {
                 .http
                 .post(format!("{}/offer", client.address))
                 .json(&Offer {
+                    name: "test sender".into(),
                     version: VERSION,
                     files: vec![FileOffer {
                         name: "partial".into(),

@@ -142,7 +142,8 @@ async fn run(
             {
                 bail!("pairing cancelled");
             }
-            let client = Client::new(&address, &identity, Some(info.fingerprint.clone()), timeout)?;
+            let client = Client::new(&address, &identity, Some(info.fingerprint.clone()), timeout)?
+                .with_name(config.name.clone());
             client
                 .pair(&advertise.unwrap_or(local_address(&address, config.port).await?))
                 .await?;
@@ -234,7 +235,8 @@ async fn run(
                 .get(&address)
                 .context("unpaired device; run meshdrop pair first")?
                 .clone();
-            let client = Client::new(&address, &identity, Some(pin), timeout)?;
+            let client = Client::new(&address, &identity, Some(pin), timeout)?
+                .with_name(config.name.clone());
             let (tx, mut rx) = mpsc::channel::<transfer::Progress>(16);
             let display = tokio::spawn(async move {
                 while let Some(event) = rx.recv().await {

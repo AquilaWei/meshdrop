@@ -19,3 +19,5 @@
 - Add process-level transfer tests and container verification scripts.
 
 Version is inherited exclusively from the root Cargo workspace manifest.
+
+- Desktop preparation: invitations retain the sender display name while certificate pins remain authoritative.
