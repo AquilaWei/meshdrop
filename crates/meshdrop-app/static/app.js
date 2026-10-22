@@ -141,3 +141,24 @@ poll(); refresh(); setInterval(poll, 300); setInterval(refresh, 8000);
 $('#pick-files').addEventListener('click', async () => { try { await act('pick_files'); await poll(); } catch (_) { /* rendered */ } });
 $('#send').addEventListener('click', async () => { try { await act('send',{targets:[...selected]}); await poll(); } catch (_) { /* rendered */ } });
 $('#open-folder').addEventListener('click', async () => { try { await act('open_receive_directory'); } catch (_) { /* rendered */ } });
+
+let settings = null;
+function renderSettings(value) {
+  settings = value.config;
+  $('#setting-folder').value = settings.receive_directory; $('#setting-port').value = settings.port;
+  $('#setting-networks').value = settings.allowed_networks.join('\n');
+  document.querySelectorAll('[name=provider]').forEach(node => { node.checked = settings.providers.includes(node.value); });
+  $('#setting-invitation').value = settings.invitation_timeout_seconds; $('#setting-idle').value = settings.idle_timeout_seconds;
+  $('#setting-notifications').checked = settings.notifications_enabled;
+  $('#settings-toml').value = value.toml;
+}
+async function saveSettings(payload) {
+  try { renderSettings(await act('save_settings',payload)); $('#settings-status').textContent = 'Saved. Restart to apply folder and network settings; notifications updated now.'; }
+  catch (_) { $('#settings-status').textContent = 'Settings were not saved.'; }
+}
+$('#settings-form').addEventListener('submit', event => {
+  event.preventDefault();
+  saveSettings({config:{...settings, receive_directory:$('#setting-folder').value, port:Number($('#setting-port').value), allowed_networks:$('#setting-networks').value.split(/\s+/).filter(Boolean), providers:[...document.querySelectorAll('[name=provider]:checked')].map(node => node.value), invitation_timeout_seconds:Number($('#setting-invitation').value), idle_timeout_seconds:Number($('#setting-idle').value), notifications_enabled:$('#setting-notifications').checked}});
+});
+$('#save-toml').addEventListener('click', () => saveSettings({toml:$('#settings-toml').value}));
+act('settings').then(renderSettings).catch(() => { /* act renders configuration errors */ });

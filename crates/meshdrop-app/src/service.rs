@@ -159,6 +159,10 @@ impl Actor {
                 Some(event) = update_rx.recv() => self.progress(event),
                 Some(result) = jobs.join_next() => match result {
                     Ok(job) => {
+                        if job.operation == "save_settings" && let Ok(value) = &job.result {
+                            self.session.config.notifications_enabled = value["config"]["notifications_enabled"].as_bool().unwrap_or(true);
+                            self.view["restart_required"] = json!(true);
+                        }
                         if let Some(id) = job.operation.strip_prefix("send:") { self.sent(id, &job.result); }
                         if let Ok(value) = &job.result && job.operation == "refresh" {
                             self.view["devices"] = value["devices"].clone();
@@ -193,13 +197,14 @@ impl Actor {
             transfer::InvitationKind::Files(files) => ("files", json!({"files": files})),
         };
         self.view["invitations"].as_array_mut().expect("array").push(json!({"id": id, "kind": kind, "peer": invitation.peer, "name": invitation.peer_name, "detail": detail}));
-        if let Err(error) = self
-            .notices
-            .send(Notice::Invitation(format!(
-                "{} requests {kind}",
-                invitation.peer_name
-            )))
-            .await
+        if self.session.config.notifications_enabled
+            && let Err(error) = self
+                .notices
+                .send(Notice::Invitation(format!(
+                    "{} requests {kind}",
+                    invitation.peer_name
+                )))
+                .await
         {
             self.view["error"] = json!(format!("notification channel: {error}"));
         }
@@ -495,6 +500,18 @@ impl Session {
         let trust = self.trust().await?;
         let timeout = Duration::from_secs(self.config.invitation_timeout_seconds + 5);
         match operation {
+            "settings" => {
+                let path = self.directory.join("config.toml");
+                tokio::task::spawn_blocking(move || {
+                    let config = Config::load(&path)?;
+                    Ok(json!({"toml":toml::to_string_pretty(&config)?,"config":config}))
+                })
+                .await?
+            }
+            "save_settings" => {
+                let path = self.directory.join("config.toml");
+                tokio::task::spawn_blocking(move || save_settings(&path, payload)).await?
+            }
             "refresh" => {
                 let mut providers: Vec<Box<dyn DiscoveryProvider>> = Vec::new();
                 let mut addresses = manual;
@@ -608,6 +625,38 @@ impl Session {
         }
     }
 }
+fn save_settings(path: &std::path::Path, payload: Value) -> Result<Value> {
+    let result = (|| {
+        let config: Config = if let Some(text) = payload["toml"].as_str() {
+            toml::from_str(text)?
+        } else {
+            serde_json::from_value(payload["config"].clone())?
+        };
+        if config.port == 0
+            || config.invitation_timeout_seconds == 0
+            || config.idle_timeout_seconds == 0
+        {
+            bail!("port and both timeouts must be positive");
+        }
+        if config.receive_directory.as_os_str().is_empty() {
+            bail!("receive directory must not be empty");
+        }
+        if config.providers.iter().any(|provider| {
+            !["mdns", "manual", "peer-list", "tailscale"].contains(&provider.as_str())
+        }) {
+            bail!("unknown discovery provider");
+        }
+        let text = toml::to_string_pretty(&config)?;
+        let mut temporary =
+            tempfile::NamedTempFile::new_in(path.parent().context("configuration has no parent")?)?;
+        use std::io::Write;
+        temporary.write_all(text.as_bytes())?;
+        temporary.as_file().sync_all()?;
+        temporary.persist(path)?;
+        Ok(json!({"config":config,"toml":text,"restart_required":true}))
+    })();
+    result.with_context(|| format!("configuration {}", path.display()))
+}
 fn error_status(error: &str) -> &'static str {
     if error.contains("cancel") {
         "cancelled"
@@ -711,6 +760,64 @@ mod tests {
         })
         .await
         .unwrap()
+    }
+    #[tokio::test]
+    async fn saving_settings_persists_toml_and_disables_notifications_immediately() {
+        let (a, first, mut notices) = profile("First", "[]").await;
+        let settings = first
+            .call(
+                "save_settings",
+                json!({"toml":"port = 9843\nnotifications_enabled = false\nproviders = []\n"}),
+            )
+            .await
+            .unwrap();
+        assert_eq!(settings["restart_required"], true);
+        assert!(
+            !Config::load(&a.path().join("config.toml"))
+                .unwrap()
+                .notifications_enabled
+        );
+        let identity = Identity::load(&a.path().join("other")).unwrap();
+        let client = transfer::Client::new(
+            &address(&first).await,
+            &identity,
+            None,
+            Duration::from_secs(2),
+        )
+        .unwrap();
+        let pairing = tokio::spawn(async move { client.pair("other:9843").await });
+        tokio::time::sleep(Duration::from_millis(40)).await;
+        let snapshot = first.call("snapshot", Value::Null).await.unwrap();
+        assert_eq!(snapshot["invitations"].as_array().unwrap().len(), 1);
+        assert!(notices.try_recv().is_err());
+        first
+            .call(
+                "decide",
+                json!({"id":snapshot["invitations"][0]["id"],"accept":false}),
+            )
+            .await
+            .unwrap();
+        assert!(pairing.await.unwrap().is_err());
+        first.shutdown().await;
+    }
+    #[test]
+    fn invalid_settings_preserve_previous_configuration() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("config.toml");
+        std::fs::write(&path, "port = 9843\n").unwrap();
+        assert!(save_settings(&path, json!({"toml":"port = 0"})).is_err());
+        assert_eq!(std::fs::read_to_string(path).unwrap(), "port = 9843\n");
+    }
+    #[tokio::test]
+    async fn settings_unknown_key_reports_configuration_path() {
+        let (_a, first, _notices) = profile("First", "[]").await;
+        let error = first
+            .call("save_settings", json!({"toml":"prot = 4"}))
+            .await
+            .unwrap_err();
+        assert!(error.contains("config.toml"));
+        assert!(error.contains("prot"));
+        first.shutdown().await;
     }
     #[tokio::test]
     async fn accepted_desktop_transfer_reports_verified_completion_and_lands_file() {

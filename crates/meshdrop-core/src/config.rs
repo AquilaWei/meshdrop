@@ -19,6 +19,8 @@ pub struct Config {
     /// Maximum gap between received chunks or between authorized uploads.
     pub idle_timeout_seconds: u64,
     pub name: String,
+    /// Desktop notifications can be disabled without affecting invitation decisions.
+    pub notifications_enabled: bool,
 }
 impl Default for Config {
     fn default() -> Self {
@@ -42,6 +44,7 @@ impl Default for Config {
             invitation_timeout_seconds: 60,
             idle_timeout_seconds: 60,
             name: "meshdrop".into(),
+            notifications_enabled: true,
         }
     }
 }

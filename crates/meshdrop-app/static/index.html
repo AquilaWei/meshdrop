@@ -12,5 +12,15 @@
 <section><div class="section-heading"><h2>Send files</h2><button id="pick-files">Choose files…</button></div><p id="selected-files">No files selected</p><button id="send">Send to selected devices</button></section>
 <section><h2>Incoming requests</h2><div id="invitations"></div></section>
 <section><div class="section-heading"><h2>Transfers</h2><button id="open-folder" class="secondary">Open receive folder</button></div><div id="transfers"></div></section>
+<section><h2>Settings</h2><p>Notification changes apply immediately. Restart the app to apply receive-folder and network settings.</p>
+<form id="settings-form">
+<label for="setting-folder">Receive folder</label><input id="setting-folder" required>
+<label for="setting-port">Port</label><input id="setting-port" type="number" min="1" max="65535" required>
+<label for="setting-networks">Allowed networks (one CIDR per line)</label><textarea id="setting-networks" rows="4"></textarea>
+<fieldset><legend>Discovery providers</legend><label><input type="checkbox" name="provider" value="mdns"> mDNS</label><label><input type="checkbox" name="provider" value="manual"> Manual</label><label><input type="checkbox" name="provider" value="peer-list"> Peer list</label><label><input type="checkbox" name="provider" value="tailscale"> Tailscale</label></fieldset>
+<label for="setting-invitation">Invitation timeout (seconds)</label><input id="setting-invitation" type="number" min="1" required>
+<label for="setting-idle">Idle timeout (seconds without bytes)</label><input id="setting-idle" type="number" min="1" required>
+<label><input id="setting-notifications" type="checkbox"> System notifications</label><button>Save settings</button>
+</form><p id="settings-status" role="status"></p><details><summary>Advanced TOML editor</summary><textarea id="settings-toml" aria-label="Configuration TOML"></textarea><button id="save-toml">Validate and save TOML</button></details></section>
 </main><footer>Receive service runs while this window is open. Closing the window stops it safely.</footer>
 </body></html>

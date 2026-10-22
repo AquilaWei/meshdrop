@@ -112,3 +112,16 @@ The window starts the core receiver and mDNS advertisement in the same process;
 closing it cancels reception and withdraws discovery. Use `MESHDROP_STATE_DIR` to
 select an isolated profile; otherwise the CLI and app share the platform config
 folder and cannot bind the same port simultaneously.
+
+The app displays provider diagnostics without hiding usable devices. Add an address
+or QR payload, compare six-digit codes on both devices, then explicitly accept the
+incoming pairing. Select paired devices and files to send; incoming file offers
+always require an in-app decision. Device names and filenames render as text.
+Settings are saved atomically to the shared `config.toml`; unknown keys include the
+file path in the error. `notifications_enabled` toggles desktop notifications
+immediately. Restart after changing the receive folder, port, providers, networks
+or either timeout. Closing the app stops its background receiver.
+
+On macOS, the app is unsigned: **right-click → Open** the first time, then confirm
+Open in the system dialog. Native appearance and notification permissions still
+need the checks in `docs/acceptance.md`.
