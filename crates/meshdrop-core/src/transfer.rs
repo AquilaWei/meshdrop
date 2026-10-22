@@ -127,7 +127,7 @@ pub async fn serve(
     progress: mpsc::Sender<Progress>,
     shutdown: CancellationToken,
 ) -> Result<()> {
-    std::fs::create_dir_all(&config.receive_directory)?;
+    tokio::fs::create_dir_all(&config.receive_directory).await?;
     let tls = rustls::ServerConfig::builder_with_provider(Arc::new(
         rustls::crypto::ring::default_provider(),
     ))
@@ -250,25 +250,32 @@ fn report_connection(result: std::result::Result<Result<()>, tokio::task::JoinEr
 async fn info(State(s): State<ServerState>) -> Json<Info> {
     Json(s.info)
 }
+// Storage work is routed through one helper so executor isolation is testable.
+async fn storage_task<T, F>(operation: F) -> Result<T>
+where
+    T: Send + 'static,
+    F: FnOnce() -> Result<T> + Send + 'static,
+{
+    tokio::task::spawn_blocking(operation)
+        .await
+        .context("blocking storage task failed")?
+}
+async fn load_trust(path: PathBuf) -> Result<TrustStore> {
+    storage_task(move || TrustStore::load(&path)).await
+}
 async fn peers(
     State(s): State<ServerState>,
     Extension(peer): Extension<String>,
 ) -> ApiResult<HashMap<String, String>> {
-    authorized(&s, &peer).map_err(api_error)?;
-    Ok(Json(
-        TrustStore::load(&s.directory.join("trust.json"))
-            .map_err(api_error)?
-            .0
-            .into_iter()
-            .collect(),
-    ))
+    let trust = authorized(&s, &peer).await.map_err(api_error)?;
+    Ok(Json(trust.0.into_iter().collect()))
 }
-fn authorized(state: &ServerState, peer: &str) -> Result<()> {
-    let trust = TrustStore::load(&state.directory.join("trust.json"))?;
-    if !trust.0.values().any(|p| p == peer) {
+async fn authorized(state: &ServerState, peer: &str) -> Result<TrustStore> {
+    let trust = load_trust(state.directory.join("trust.json")).await?;
+    if !trust.0.values().any(|pin| pin == peer) {
         bail!("unpaired device");
     }
-    Ok(())
+    Ok(trust)
 }
 async fn decide(
     s: &ServerState,
@@ -310,10 +317,12 @@ async fn pair(
     )
     .await
     .map_err(api_error)?;
-    TrustStore::load(&s.directory.join("trust.json"))
-        .map_err(api_error)?
-        .remember(&s.directory.join("trust.json"), &request.address, &peer)
-        .map_err(api_error)?;
+    let trust_path = s.directory.join("trust.json");
+    storage_task(move || {
+        TrustStore::load(&trust_path)?.remember(&trust_path, &request.address, &peer)
+    })
+    .await
+    .map_err(api_error)?;
     Ok(Json(s.info))
 }
 async fn offer(
@@ -323,7 +332,7 @@ async fn offer(
 ) -> ApiResult<String> {
     version(request.version).map_err(api_error)?;
     {
-        authorized(&s, &peer).map_err(api_error)?;
+        authorized(&s, &peer).await.map_err(api_error)?;
     }
     if request.files.is_empty() || request.files.len() > 128 {
         return Err(api_error("offer must contain 1..128 files"));
@@ -450,7 +459,9 @@ async fn upload(
         completed: false,
     };
     let receive = async {
-        let mut sink = Sink::new(&s.config.receive_directory, &file.name)?;
+        let directory = s.config.receive_directory.clone();
+        let name = file.name.clone();
+        let mut sink = storage_task(move || Sink::new(&directory, &name)).await?;
         let mut stream = body.into_data_stream().filter(|chunk| {
             futures_util::future::ready(chunk.as_ref().map_or(true, |bytes| !bytes.is_empty()))
         });
@@ -469,7 +480,12 @@ async fn upload(
             if bytes > file.size {
                 bail!("upload exceeds offered size");
             }
-            sink.write(&chunk)?;
+            // Await each bounded chunk's disk write before polling the network again.
+            sink = storage_task(move || {
+                sink.write(&chunk)?;
+                Ok(sink)
+            })
+            .await?;
             s.progress
                 .send(Progress {
                     transfer: id.clone(),
@@ -480,7 +496,11 @@ async fn upload(
                 .await
                 .context("progress consumer disconnected")?;
         }
-        let path = sink.finish(file.size, &file.sha256)?;
+        let size = file.size;
+        let digest = file.sha256.clone();
+        let token = cancel.clone();
+        let path =
+            storage_task(move || sink.finish_if(size, &digest, || !token.is_cancelled())).await?;
         Ok::<_, anyhow::Error>(path.display().to_string())
     };
     let result = tokio::select! { _ = cancel.cancelled() => Err(anyhow::anyhow!("transfer cancelled")), result = receive => result };
@@ -1248,5 +1268,28 @@ mod tests {
         .await;
         assert!(result.is_ok());
         assert_eq!(rx.recv().await, Some(()));
+    }
+    #[tokio::test(flavor = "current_thread")]
+    async fn blocking_storage_does_not_stall_async_executor() {
+        let (release, waiting) = std::sync::mpsc::channel();
+        let releaser = tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+            release.send(()).unwrap();
+        });
+        let result = storage_task(move || {
+            waiting
+                .recv_timeout(Duration::from_secs(1))
+                .context("async executor was blocked by storage")?;
+            Ok(())
+        })
+        .await;
+        assert!(result.is_ok());
+        releaser.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn blocking_storage_errors_reach_caller() {
+        let result: Result<()> = storage_task(|| anyhow::bail!("injected disk failure")).await;
+        assert_eq!(result.unwrap_err().to_string(), "injected disk failure");
     }
 }

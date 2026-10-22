@@ -96,9 +96,21 @@ impl Sink {
     }
     /// Verifies bytes and publishes atomically without replacing existing files.
     /// Size or digest mismatch removes the temporary file and returns an error.
-    pub fn finish(mut self, size: u64, digest: &str) -> Result<PathBuf> {
+    pub fn finish(self, size: u64, digest: &str) -> Result<PathBuf> {
+        self.finish_if(size, digest, || true)
+    }
+    // Recheck cancellation after slow sync_all and before each publication attempt.
+    pub(crate) fn finish_if(
+        mut self,
+        size: u64,
+        digest: &str,
+        permitted: impl Fn() -> bool,
+    ) -> Result<PathBuf> {
         if self.size != size || hex::encode(self.hash.clone().finalize()) != digest {
             bail!("SHA-256 or size mismatch");
+        }
+        if !permitted() {
+            bail!("transfer cancelled");
         }
         self.temp.as_file_mut().sync_all()?;
         let mut number = 0u64;
@@ -111,6 +123,9 @@ impl Sink {
                 let (short_stem, short_ext) = split(&shortened);
                 format!("{short_stem}{suffix}{short_ext}")
             };
+            if !permitted() {
+                bail!("transfer cancelled");
+            }
             let destination = self.directory.join(name);
             match self.temp.persist_noclobber(&destination) {
                 Ok(_) => return Ok(destination),
