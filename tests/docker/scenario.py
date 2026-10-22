@@ -42,7 +42,7 @@ try:
             execute(name, "mkdir", "-p", "/state", "/received")
             config = root / f"config-{index}.toml"
             config.write_text(f'name = "peer-{index}"\nreceive_directory = "/received"\n'
-                              'providers = ["mdns"]\ntimeout_seconds = 30\n')
+                              'providers = ["mdns"]\ninvitation_timeout_seconds = 30\n')
             run("cp", str(config), name + ":/state/config.toml")
             flag = "--auto-reject" if index == 2 else "--auto-accept"
             run("exec", "-d", name, "sh", "-c",

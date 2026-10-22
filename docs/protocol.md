@@ -44,8 +44,12 @@ removal and a new pairing. Never automatically replace a pin.
 
 Network allowlisting occurs before TLS; IPv4-mapped IPv6 is normalized. Public
 sources are denied by default. Metadata bodies are capped at 64 KiB. Uploads
-stream without an aggregate memory buffer. Configured transfer timeout bounds
-both incomplete sessions and each upload; increase it for large/slow transfers.
+stream without an aggregate memory buffer. `invitation_timeout_seconds` bounds confirmation waiting.
+`idle_timeout_seconds` bounds the wait for each next nonempty upload chunk,
+resetting after bytes arrive. Accepted transfers waiting to start a file expire
+only while no upload is active; the expiry task never cancels active uploads.
+There is no total transfer-duration deadline. Clients also avoid aggregate
+upload request timeouts; control requests retain deadlines.
 Progress indicates locally processed bytes; success is the final HTTP response,
 not the last progress event. Multi-file transfers commit each file separately:
 a later failure leaves earlier verified, completed files intact.

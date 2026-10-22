@@ -15,7 +15,9 @@ pub struct Config {
     pub port: u16,
     pub allowed_networks: Vec<IpNet>,
     pub providers: Vec<String>,
-    pub timeout_seconds: u64,
+    pub invitation_timeout_seconds: u64,
+    /// Maximum gap between received chunks or between authorized uploads.
+    pub idle_timeout_seconds: u64,
     pub name: String,
 }
 impl Default for Config {
@@ -37,7 +39,8 @@ impl Default for Config {
             .map(|n| n.parse().expect("constant network"))
             .into(),
             providers: vec!["mdns".into(), "manual".into(), "peer-list".into()],
-            timeout_seconds: 60,
+            invitation_timeout_seconds: 60,
+            idle_timeout_seconds: 60,
             name: "meshdrop".into(),
         }
     }

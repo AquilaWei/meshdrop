@@ -1,5 +1,9 @@
 # Changelog
 
+## Review corrections
+
+- Separate invitation waiting from upload idle timeouts so active large transfers continue.
+
 ## Initial stage-one development
 
 - Create the meshdrop Rust workspace and cross-platform verification CI.

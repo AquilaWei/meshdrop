@@ -27,7 +27,7 @@ impl Receiver {
             .display()
             .to_string()
             .replace('\\', "\\\\");
-        fs::write(dir.path().join("config.toml"),format!("port = {port}\nreceive_directory = \"{received}\"\nproviders = [\"manual\"]\ntimeout_seconds = 30\n")).unwrap();
+        fs::write(dir.path().join("config.toml"),format!("port = {port}\nreceive_directory = \"{received}\"\nproviders = [\"manual\"]\ninvitation_timeout_seconds = 30\n")).unwrap();
         let log = dir.path().join("stderr.log");
         let flag = if reject {
             "--auto-reject"

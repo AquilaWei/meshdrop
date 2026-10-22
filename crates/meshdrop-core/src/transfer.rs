@@ -90,6 +90,8 @@ struct Active {
     owner: String,
     files: Vec<Option<FileOffer>>,
     cancel: CancellationToken,
+    uploading: usize,
+    pending_since: tokio::time::Instant,
 }
 struct Inner {
     active: HashMap<String, Active>,
@@ -216,7 +218,7 @@ async fn decide(
     cancel: CancellationToken,
 ) -> Result<()> {
     let (tx, rx) = oneshot::channel();
-    let timeout = Duration::from_secs(s.config.timeout_seconds);
+    let timeout = Duration::from_secs(s.config.invitation_timeout_seconds);
     let result = async {
         s.invitations
             .send(Invitation {
@@ -289,19 +291,34 @@ async fn offer(
             owner: peer,
             files: request.files.into_iter().map(Some).collect(),
             cancel: cancel.clone(),
+            uploading: 0,
+            pending_since: tokio::time::Instant::now(),
         },
     );
     let state = s.clone();
     let expired = id.clone();
     tokio::spawn(async move {
-        tokio::time::sleep(Duration::from_secs(state.config.timeout_seconds)).await;
-        match state.inner.lock() {
-            Ok(mut inner) => {
-                if let Some(active) = inner.active.remove(&expired) {
-                    active.cancel.cancel();
+        let idle = Duration::from_secs(state.config.idle_timeout_seconds);
+        loop {
+            tokio::time::sleep(idle.max(Duration::from_millis(1))).await;
+            match state.inner.lock() {
+                Ok(mut inner) => match inner.active.get(&expired) {
+                    None => break,
+                    Some(active)
+                        if active.uploading == 0 && active.pending_since.elapsed() >= idle =>
+                    {
+                        if let Some(active) = inner.active.remove(&expired) {
+                            active.cancel.cancel();
+                        }
+                        break;
+                    }
+                    _ => {}
+                },
+                Err(error) => {
+                    eprintln!("transfer expiry: {error}");
+                    break;
                 }
             }
-            Err(error) => eprintln!("transfer expiry: {error}"),
         }
     });
     Ok(Json(id))
@@ -322,7 +339,30 @@ async fn cancel(
         }
         return Ok(Json(true));
     }
+    if !inner.active.contains_key(&id) {
+        return Ok(Json(false));
+    }
     Err(api_error("unknown transfer"))
+}
+// Connection cancellation can drop the handler before its normal epilogue runs.
+struct UploadGuard {
+    state: ServerState,
+    id: String,
+    completed: bool,
+}
+impl Drop for UploadGuard {
+    fn drop(&mut self) {
+        if !self.completed {
+            match self.state.inner.lock() {
+                Ok(mut inner) => {
+                    if let Some(active) = inner.active.remove(&self.id) {
+                        active.cancel.cancel();
+                    }
+                }
+                Err(error) => eprintln!("upload cleanup: {error}"),
+            }
+        }
+    }
 }
 async fn upload(
     State(s): State<ServerState>,
@@ -342,13 +382,27 @@ async fn upload(
             .get_mut(index)
             .and_then(Option::take)
             .ok_or_else(|| api_error("unknown or already uploaded file"))?;
+        active.uploading += 1;
         (file, active.cancel.clone())
+    };
+    let mut guard = UploadGuard {
+        state: s.clone(),
+        id: id.clone(),
+        completed: false,
     };
     let receive = async {
         let mut sink = Sink::new(&s.config.receive_directory, &file.name)?;
-        let mut stream = body.into_data_stream();
+        let mut stream = body.into_data_stream().filter(|chunk| {
+            futures_util::future::ready(chunk.as_ref().map_or(true, |bytes| !bytes.is_empty()))
+        });
         let mut bytes = 0u64;
-        while let Some(chunk) = stream.next().await {
+        while let Some(chunk) = tokio::time::timeout(
+            Duration::from_secs(s.config.idle_timeout_seconds),
+            stream.next(),
+        )
+        .await
+        .context("upload idle timeout")?
+        {
             let chunk = chunk?;
             bytes = bytes
                 .checked_add(chunk.len() as u64)
@@ -370,13 +424,27 @@ async fn upload(
         let path = sink.finish(file.size, &file.sha256)?;
         Ok::<_, anyhow::Error>(path.display().to_string())
     };
-    tokio::select! { _ = cancel.cancelled() => Err(api_error("transfer cancelled")), result = tokio::time::timeout(Duration::from_secs(s.config.timeout_seconds), receive) => Ok(Json(result.map_err(api_error)?.map_err(api_error)?)) }
+    let result = tokio::select! { _ = cancel.cancelled() => Err(anyhow::anyhow!("transfer cancelled")), result = receive => result };
+    let mut inner = s.inner.lock().map_err(api_error)?;
+    if let Some(active) = inner.active.get_mut(&id) {
+        active.uploading -= 1;
+        active.pending_since = tokio::time::Instant::now();
+        if (result.is_err() || (active.uploading == 0 && active.files.iter().all(Option::is_none)))
+            && let Some(active) = inner.active.remove(&id)
+        {
+            active.cancel.cancel();
+        }
+    }
+    guard.completed = true;
+    result.map(Json).map_err(api_error)
 }
 
 /// A client uses mutual TLS and pins on every connection. Bootstrap clients may
 /// fetch metadata only; callers must compare QR pins or confirm the short code.
 pub struct Client {
     http: reqwest::Client,
+    upload_http: reqwest::Client,
+    timeout: Duration,
     address: String,
 }
 impl Client {
@@ -395,15 +463,18 @@ impl Client {
         .dangerous()
         .with_custom_certificate_verifier(Arc::new(Verifier(pin)))
         .with_client_auth_cert(vec![identity.certificate()], identity.key())?;
-        let http = reqwest::Client::builder()
+        let builder = reqwest::Client::builder()
             .use_preconfigured_tls(tls)
             .tls_info(true)
             .redirect(reqwest::redirect::Policy::none())
             .no_proxy()
-            .timeout(timeout)
-            .build()?;
+            .connect_timeout(timeout);
+        let upload_http = builder.build()?;
+        let http = upload_http.clone();
         Ok(Self {
             http,
+            upload_http,
+            timeout,
             address: format!(
                 "https://{}",
                 address.trim_start_matches("https://").trim_end_matches('/')
@@ -421,6 +492,7 @@ impl Client {
         let response = Self::checked(
             self.http
                 .get(format!("{}/info", self.address))
+                .timeout(self.timeout)
                 .send()
                 .await?,
         )
@@ -444,6 +516,7 @@ impl Client {
         Ok(Self::checked(
             self.http
                 .post(format!("{}/pair", self.address))
+                .timeout(self.timeout)
                 .json(&Pair {
                     version: VERSION,
                     address: address.into(),
@@ -461,6 +534,7 @@ impl Client {
         Ok(Self::checked(
             self.http
                 .get(format!("{}/peers", self.address))
+                .timeout(self.timeout)
                 .send()
                 .await?,
         )
@@ -508,6 +582,7 @@ impl Client {
         let request = self
             .http
             .post(format!("{}/offer", self.address))
+            .timeout(self.timeout)
             .json(&Offer {
                 version: VERSION,
                 files: files.clone(),
@@ -517,7 +592,7 @@ impl Client {
         let id: String = Self::checked(response).await?.json().await?;
         let sending = self.upload_files(&id, paths, files, progress);
         tokio::select! { result = sending => result, _ = cancel.cancelled() => {
-         Self::checked(self.http.post(format!("{}/cancel/{id}",self.address)).send().await?).await?;
+         Self::checked(self.http.post(format!("{}/cancel/{id}",self.address)).timeout(self.timeout).send().await?).await?;
          bail!("transfer cancelled")
         } }
     }
@@ -554,7 +629,7 @@ impl Client {
                 }
             });
             Self::checked(
-                self.http
+                self.upload_http
                     .post(format!("{}/upload/{id}/{index}", self.address))
                     .body(reqwest::Body::wrap_stream(stream))
                     .send()
@@ -613,7 +688,8 @@ mod tests {
                 listener,
                 Config {
                     receive_directory: receiver.clone(),
-                    timeout_seconds,
+                    invitation_timeout_seconds: timeout_seconds,
+                    idle_timeout_seconds: timeout_seconds,
                     ..Config::default()
                 },
                 state,
@@ -956,6 +1032,49 @@ mod tests {
                 .to_string()
                 .contains("unpaired device")
         );
+        h.finish().await;
+    }
+    #[tokio::test]
+    async fn sustained_upload_outlives_timeout() {
+        let mut h = Harness::new(1).await;
+        let id = raw_offer(&mut h, 4, hex::encode(Sha256::digest(b"abcd"))).await;
+        let stream =
+            futures_util::stream::iter([b"a", b"b", b"c", b"d"]).then(|chunk| async move {
+                tokio::time::sleep(Duration::from_millis(400)).await;
+                Ok::<_, std::io::Error>(bytes::Bytes::copy_from_slice(chunk))
+            });
+        let response = h
+            .client
+            .http
+            .post(format!("{}/upload/{id}/0", h.client.address))
+            .body(reqwest::Body::wrap_stream(stream))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(std::fs::read(h.receiver.join("raw")).unwrap(), b"abcd");
+        h.finish().await;
+    }
+    #[tokio::test]
+    async fn idle_upload_reports_idle_timeout_and_cleans_partial() {
+        let mut h = Harness::new(1).await;
+        let id = raw_offer(&mut h, 4, "00".repeat(32)).await;
+        let (tx, rx) = mpsc::channel::<Result<bytes::Bytes, std::io::Error>>(2);
+        tx.send(Ok(bytes::Bytes::from_static(b"a"))).await.unwrap();
+        let stream = futures_util::stream::unfold(rx, |mut rx| async move {
+            rx.recv().await.map(|chunk| (chunk, rx))
+        });
+        let response = h
+            .client
+            .http
+            .post(format!("{}/upload/{id}/0", h.client.address))
+            .body(reqwest::Body::wrap_stream(stream))
+            .send()
+            .await
+            .unwrap();
+        assert!(response.text().await.unwrap().contains("idle timeout"));
+        assert_eq!(std::fs::read_dir(&h.receiver).unwrap().count(), 0);
+        drop(tx);
         h.finish().await;
     }
 }

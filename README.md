@@ -50,7 +50,8 @@ receive_directory = "received"
 port = 9843
 allowed_networks = ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "100.64.0.0/10", "169.254.0.0/16", "127.0.0.0/8", "::1/128", "fc00::/7", "fe80::/10"]
 providers = ["mdns", "manual", "peer-list"]
-timeout_seconds = 60
+invitation_timeout_seconds = 60
+idle_timeout_seconds = 60
 name = "my-laptop"
 ```
 
@@ -58,7 +59,10 @@ Add `"tailscale"` to providers for optional local `tailscale status --json`
 discovery. Missing tools return a reason. Manual candidates can be passed to
 `devices host:9843`. Discovery does not automatically trust candidates. Peer-list
 requires reachable, already paired devices. Provider failures are explicit errors.
-Set a longer timeout for large or slow transfers. Multi-file completion is per
+Invitation timeout limits confirmation waiting; idle timeout limits gaps between
+received chunks and accepted uploads that never start. Sustained transfers have
+no total-duration limit. The old `timeout_seconds` key is rejected; replace it
+with the two explicit keys above. Multi-file completion is per
 file, so successfully completed files remain if a later file fails.
 
 ## Contribute and verify

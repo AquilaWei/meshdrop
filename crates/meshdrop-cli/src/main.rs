@@ -103,7 +103,7 @@ async fn run(
     identity: Arc<Identity>,
     stop: CancellationToken,
 ) -> Result<()> {
-    let timeout = Duration::from_secs(config.timeout_seconds + 5);
+    let timeout = Duration::from_secs(config.invitation_timeout_seconds + 5);
     let trust_path = directory.join("trust.json");
     let mut trust = TrustStore::load(&trust_path)?;
     match command {
