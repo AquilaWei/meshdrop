@@ -15,27 +15,63 @@ pub struct Device {
     pub address: String,
     pub online: bool,
 }
-/// Providers return errors with reasons so optional integrations fail visibly.
-#[async_trait]
-pub trait DiscoveryProvider: Send + Sync {
-    /// Returns candidates without changing trust. Discovery or process failures propagate.
-    async fn discover(&self) -> Result<Vec<Device>>;
+/// Partial results keep optional integrations from hiding reachable devices.
+#[derive(Default, Debug, Serialize, Deserialize)]
+pub struct DiscoveryReport {
+    pub devices: Vec<Device>,
+    pub problems: Vec<DiscoveryProblem>,
 }
-/// Merges providers by address. An online result wins over stale offline metadata.
-/// Provider failures propagate, letting frontends present explicit diagnostics.
-pub async fn discover(providers: &[Box<dyn DiscoveryProvider>]) -> Result<Vec<Device>> {
-    let mut merged = BTreeMap::new();
-    for provider in providers {
-        for device in provider.discover().await? {
-            let old = merged
-                .entry(device.address.clone())
-                .or_insert_with(|| device.clone());
-            if device.online {
-                *old = device;
-            }
+/// Diagnostics name the integration and preserve the original failure reason.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct DiscoveryProblem {
+    pub provider: String,
+    pub error: String,
+}
+impl From<Vec<Device>> for DiscoveryReport {
+    fn from(devices: Vec<Device>) -> Self {
+        Self {
+            devices,
+            problems: vec![],
         }
     }
-    Ok(merged.into_values().collect())
+}
+/// Providers can return partial results; complete setup failures remain errors.
+#[async_trait]
+pub trait DiscoveryProvider: Send + Sync {
+    /// Stable diagnostic name; frontends can show failures independently of results.
+    fn name(&self) -> &'static str {
+        std::any::type_name::<Self>()
+    }
+    /// Returns candidates without changing trust. Partial failures belong in problems.
+    async fn discover(&self) -> Result<DiscoveryReport>;
+}
+/// Merges all usable results while retaining diagnostics from every provider.
+pub async fn discover(providers: &[Box<dyn DiscoveryProvider>]) -> DiscoveryReport {
+    let mut merged = BTreeMap::new();
+    let mut problems = Vec::new();
+    for provider in providers {
+        match provider.discover().await {
+            Ok(report) => {
+                problems.extend(report.problems);
+                for device in report.devices {
+                    let old = merged
+                        .entry(device.address.clone())
+                        .or_insert_with(|| device.clone());
+                    if device.online {
+                        *old = device;
+                    }
+                }
+            }
+            Err(error) => problems.push(DiscoveryProblem {
+                provider: provider.name().into(),
+                error: format!("{error:#}"),
+            }),
+        }
+    }
+    DiscoveryReport {
+        devices: merged.into_values().collect(),
+        problems,
+    }
 }
 /// Manual inputs and QR payloads retain the pin for explicit pairing, separately
 /// from the candidate's untrusted descriptive metadata.
@@ -87,13 +123,16 @@ async fn probe(address: String, identity: &Identity) -> Device {
 }
 #[async_trait]
 impl DiscoveryProvider for Manual {
-    async fn discover(&self) -> Result<Vec<Device>> {
+    fn name(&self) -> &'static str {
+        "manual"
+    }
+    async fn discover(&self) -> Result<DiscoveryReport> {
         let mut devices = Vec::new();
         for input in &self.addresses {
             let (address, _) = parse_address(input)?;
             devices.push(probe(address, &self.identity).await);
         }
-        Ok(devices)
+        Ok(devices.into())
     }
 }
 /// Tailscale is optional and accessed via its documented local CLI JSON output.
@@ -103,7 +142,10 @@ pub struct Tailscale {
 }
 #[async_trait]
 impl DiscoveryProvider for Tailscale {
-    async fn discover(&self) -> Result<Vec<Device>> {
+    fn name(&self) -> &'static str {
+        "tailscale"
+    }
+    async fn discover(&self) -> Result<DiscoveryReport> {
         let output = tokio::process::Command::new("tailscale")
             .args(["status", "--json"])
             .output()
@@ -133,7 +175,7 @@ impl DiscoveryProvider for Tailscale {
                 }
             }
         }
-        Ok(devices)
+        Ok(devices.into())
     }
 }
 /// Peer lists extend discovery through already authenticated peers only.
@@ -143,20 +185,36 @@ pub struct PeerList {
 }
 #[async_trait]
 impl DiscoveryProvider for PeerList {
-    async fn discover(&self) -> Result<Vec<Device>> {
-        let mut devices = Vec::new();
+    fn name(&self) -> &'static str {
+        "peer-list"
+    }
+    async fn discover(&self) -> Result<DiscoveryReport> {
+        let mut report = DiscoveryReport::default();
         for (address, pin) in &self.known {
-            let client = Client::new(
-                address,
-                &self.identity,
-                Some(pin.clone()),
-                Duration::from_secs(3),
-            )?;
-            for candidate in client.peers().await?.into_keys() {
-                devices.push(probe(candidate, &self.identity).await);
+            let response = async {
+                Client::new(
+                    address,
+                    &self.identity,
+                    Some(pin.clone()),
+                    Duration::from_secs(3),
+                )?
+                .peers()
+                .await
+            }
+            .await;
+            match response {
+                Ok(peers) => {
+                    for candidate in peers.into_keys() {
+                        report.devices.push(probe(candidate, &self.identity).await);
+                    }
+                }
+                Err(error) => report.problems.push(DiscoveryProblem {
+                    provider: self.name().into(),
+                    error: format!("{address}: {error:#}"),
+                }),
             }
         }
-        Ok(devices)
+        Ok(report)
     }
 }
 /// mDNS advertisements are held alive by this owner and explicitly shut down.
@@ -195,7 +253,10 @@ impl Mdns {
 }
 #[async_trait]
 impl DiscoveryProvider for Mdns {
-    async fn discover(&self) -> Result<Vec<Device>> {
+    fn name(&self) -> &'static str {
+        "mdns"
+    }
+    async fn discover(&self) -> Result<DiscoveryReport> {
         let receiver = self.daemon.browse(SERVICE)?;
         let until = tokio::time::Instant::now() + self.duration;
         let mut devices = Vec::new();
@@ -219,6 +280,6 @@ impl DiscoveryProvider for Mdns {
             }
         }
         self.daemon.stop_browse(SERVICE)?;
-        Ok(devices)
+        Ok(devices.into())
     }
 }

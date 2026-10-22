@@ -153,7 +153,10 @@ async fn run(
             let mut providers: Vec<Box<dyn DiscoveryProvider>> = vec![];
             for provider in &config.providers {
                 match provider.as_str() {
-                    "mdns" => providers.push(Box::new(Mdns::new(Duration::from_secs(3))?)),
+                    "mdns" => match Mdns::new(Duration::from_secs(3)) {
+                        Ok(provider) => providers.push(Box::new(provider)),
+                        Err(error) => eprintln!("discovery mdns: {error:#}"),
+                    },
                     "manual" => providers.push(Box::new(Manual {
                         addresses: addresses.clone(),
                         identity: identity.clone(),
@@ -169,10 +172,11 @@ async fn run(
                     _ => bail!("unknown discovery provider {provider}"),
                 }
             }
-            println!(
-                "{}",
-                serde_json::to_string_pretty(&discovery::discover(&providers).await?)?
-            );
+            let report = discovery::discover(&providers).await;
+            for problem in report.problems {
+                eprintln!("discovery {}: {}", problem.provider, problem.error);
+            }
+            println!("{}", serde_json::to_string_pretty(&report.devices)?);
         }
         Command::Receive {
             auto_accept,

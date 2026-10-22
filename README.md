@@ -58,7 +58,7 @@ name = "my-laptop"
 Add `"tailscale"` to providers for optional local `tailscale status --json`
 discovery. Missing tools return a reason. Manual candidates can be passed to
 `devices host:9843`. Discovery does not automatically trust candidates. Peer-list
-requires reachable, already paired devices. Provider failures are explicit errors.
+requires reachable, already paired devices. Provider failures are diagnostics on stderr; usable devices remain on stdout.
 Invitation timeout limits confirmation waiting; idle timeout limits gaps between
 received chunks and accepted uploads that never start. Sustained transfers have
 no total-duration limit. The old `timeout_seconds` key is rejected; replace it
