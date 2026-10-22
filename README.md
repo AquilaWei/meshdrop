@@ -96,3 +96,19 @@ right-click → Open on first launch; that UI is outside this stage.
 See [protocol](docs/protocol.md), [progress](progress.md), and
 [feature list](feature_list.json). Tauri and Android are planned next; iOS,
 Bluetooth and Taildrop compatibility are outside scope.
+
+## Desktop app (Tauri 2)
+
+The desktop shell uses static HTML/CSS/JS without Node, a frontend framework or a
+bundler. On Linux it needs Tauri's GTK 3 / WebKitGTK 4.1 development libraries;
+Windows needs the native Rust toolchain and WebView2, macOS needs Xcode tools.
+No host packages are installed by the repository scripts.
+
+```sh
+cargo run -p meshdrop-app
+```
+
+The window starts the core receiver and mDNS advertisement in the same process;
+closing it cancels reception and withdraws discovery. Use `MESHDROP_STATE_DIR` to
+select an isolated profile; otherwise the CLI and app share the platform config
+folder and cannot bind the same port simultaneously.

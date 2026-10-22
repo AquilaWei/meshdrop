@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/meshdrop-core", "crates/meshdrop-cli"]
+members = ["crates/meshdrop-core", "crates/meshdrop-cli", "crates/meshdrop-app"]
 resolver = "2"
 
 [workspace.package]
