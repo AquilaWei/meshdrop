@@ -122,7 +122,7 @@ pub async fn serve(
     listener: TcpListener,
     config: Config,
     directory: PathBuf,
-    identity: Identity,
+    identity: Arc<Identity>,
     invitations: mpsc::Sender<Invitation>,
     progress: mpsc::Sender<Progress>,
     shutdown: CancellationToken,
@@ -693,7 +693,7 @@ mod tests {
                     ..Config::default()
                 },
                 state,
-                server_id,
+                Arc::new(server_id),
                 tx,
                 progress_tx,
                 stop.clone(),
@@ -1101,10 +1101,39 @@ mod tests {
             report
                 .devices
                 .iter()
-                .any(|device| device.online && device.address == address)
+                .any(|device| device.online && device.addresses.contains(&address))
         );
         assert_eq!(report.problems.len(), 1);
         assert!(report.problems[0].error.contains("127.0.0.1:1"));
+        h.finish().await;
+    }
+    #[tokio::test]
+    async fn one_certificate_at_two_addresses_is_one_device() {
+        use crate::discovery::{Manual, discover};
+        let h = Harness::new(10).await;
+        let identity = Arc::new(Identity::load(&h._directory.path().join("client")).unwrap());
+        let socket: std::net::SocketAddr = h
+            .client
+            .address
+            .trim_start_matches("https://")
+            .parse()
+            .unwrap();
+        let report = discover(&[Box::new(Manual {
+            identity,
+            addresses: vec![socket.to_string(), format!("localhost:{}", socket.port())],
+        })])
+        .await;
+        assert_eq!(report.devices.len(), 1);
+        assert_eq!(report.devices[0].addresses.len(), 2);
+        assert_eq!(
+            report.devices[0].fingerprint.as_deref(),
+            Some(
+                Identity::load(&h._directory.path().join("server"))
+                    .unwrap()
+                    .fingerprint()
+                    .as_str()
+            )
+        );
         h.finish().await;
     }
 }

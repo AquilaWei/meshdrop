@@ -10,7 +10,8 @@ impl DiscoveryProvider for Offline {
         Ok(vec![Device {
             name: "old".into(),
             platform: "unknown".into(),
-            address: "127.0.0.1:9843".into(),
+            addresses: vec!["127.0.0.1:9843".into()],
+            fingerprint: None,
             online: false,
         }]
         .into())
@@ -22,7 +23,8 @@ impl DiscoveryProvider for Online {
         Ok(vec![Device {
             name: "new".into(),
             platform: "linux".into(),
-            address: "127.0.0.1:9843".into(),
+            addresses: vec!["127.0.0.1:9843".into()],
+            fingerprint: None,
             online: true,
         }]
         .into())
@@ -72,12 +74,12 @@ const TAILSCALE_STATUS: &[u8] = br#"{
 #[test]
 fn tailscale_status_preserves_ipv4_address() {
     let devices = meshdrop_core::discovery::parse_tailscale_status(TAILSCALE_STATUS, 9843).unwrap();
-    assert_eq!(devices[0].address, "100.64.1.2:9843");
+    assert_eq!(devices[0].addresses, ["100.64.1.2:9843"]);
 }
 #[test]
 fn tailscale_status_brackets_ipv6_address() {
     let devices = meshdrop_core::discovery::parse_tailscale_status(TAILSCALE_STATUS, 9843).unwrap();
-    assert_eq!(devices[1].address, "[fd7a:115c:a1e0::2]:9843");
+    assert_eq!(devices[1].addresses, ["[fd7a:115c:a1e0::2]:9843"]);
 }
 #[test]
 fn tailscale_status_keeps_offline_peers_offline() {

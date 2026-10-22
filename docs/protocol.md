@@ -58,6 +58,8 @@ a later failure leaves earlier verified, completed files intact.
 
 Providers are independent of transport: DNS-SD `_meshdrop._tcp.local.`, local
 `tailscale status --json` plus info probes, authenticated peer lists, and manual
-addresses/QR. Results merge by socket address, with online data preferred.
+addresses/QR. Results of successful info probes merge by observed certificate fingerprint,
+preserving all addresses. Unresolved candidates merge by address. mDNS metadata
+is descriptive and does not establish trust. Probe concurrency is bounded to 16.
 Discovery never implicitly pairs devices. mDNS is limited to a multicast domain;
 VPN connectivity does not imply multicast forwarding.

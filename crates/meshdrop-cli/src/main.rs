@@ -153,7 +153,7 @@ async fn run(
             let mut providers: Vec<Box<dyn DiscoveryProvider>> = vec![];
             for provider in &config.providers {
                 match provider.as_str() {
-                    "mdns" => match Mdns::new(Duration::from_secs(3)) {
+                    "mdns" => match Mdns::new(Duration::from_secs(3), identity.clone()) {
                         Ok(provider) => providers.push(Box::new(provider)),
                         Err(error) => eprintln!("discovery mdns: {error:#}"),
                     },
@@ -184,7 +184,7 @@ async fn run(
             auto_reject,
         } => {
             let mdns = if config.providers.iter().any(|p| p == "mdns") {
-                let mdns = Mdns::new(Duration::from_secs(3))?;
+                let mdns = Mdns::new(Duration::from_secs(3), identity.clone())?;
                 mdns.advertise(&config.name, config.port)?;
                 Some(mdns)
             } else {
@@ -210,8 +210,6 @@ async fn run(
                 }
                 Ok::<_, anyhow::Error>(())
             });
-            let identity = Arc::try_unwrap(identity)
-                .map_err(|_| anyhow::anyhow!("identity unexpectedly shared"))?;
             let result = transfer::serve(
                 listener,
                 config,

@@ -13,7 +13,9 @@ pub const SERVICE: &str = "_meshdrop._tcp.local.";
 pub struct Device {
     pub name: String,
     pub platform: String,
-    pub address: String,
+    pub addresses: Vec<String>,
+    /// Observed TLS identity used only for grouping; discovery never grants trust.
+    pub fingerprint: Option<String>,
     pub online: bool,
 }
 /// Partial results keep optional integrations from hiding reachable devices.
@@ -48,20 +50,13 @@ pub trait DiscoveryProvider: Send + Sync {
 }
 /// Merges all usable results while retaining diagnostics from every provider.
 pub async fn discover(providers: &[Box<dyn DiscoveryProvider>]) -> DiscoveryReport {
-    let mut merged = BTreeMap::new();
+    let mut devices = Vec::new();
     let mut problems = Vec::new();
     for provider in providers {
         match provider.discover().await {
             Ok(report) => {
                 problems.extend(report.problems);
-                for device in report.devices {
-                    let old = merged
-                        .entry(device.address.clone())
-                        .or_insert_with(|| device.clone());
-                    if device.online {
-                        *old = device;
-                    }
-                }
+                devices.extend(report.devices);
             }
             Err(error) => problems.push(DiscoveryProblem {
                 provider: provider.name().into(),
@@ -70,9 +65,40 @@ pub async fn discover(providers: &[Box<dyn DiscoveryProvider>]) -> DiscoveryRepo
         }
     }
     DiscoveryReport {
-        devices: merged.into_values().collect(),
+        devices: merge_devices(devices),
         problems,
     }
+}
+fn merge_devices(mut candidates: Vec<Device>) -> Vec<Device> {
+    // Verified observations first, so unresolved aliases merge into the full address set.
+    candidates.sort_by_key(|device| device.fingerprint.is_none());
+    let mut devices: Vec<Device> = Vec::new();
+    for candidate in candidates {
+        let existing =
+            devices.iter_mut().find(
+                |device| match (&device.fingerprint, &candidate.fingerprint) {
+                    (Some(first), Some(second)) => first == second,
+                    _ => device
+                        .addresses
+                        .iter()
+                        .any(|address| candidate.addresses.contains(address)),
+                },
+            );
+        match existing {
+            None => devices.push(candidate),
+            Some(device) => {
+                device.addresses.extend(candidate.addresses);
+                device.addresses.sort();
+                device.addresses.dedup();
+                if candidate.online {
+                    device.name = candidate.name;
+                    device.platform = candidate.platform;
+                    device.online = true;
+                }
+            }
+        }
+    }
+    devices
 }
 /// Manual inputs and QR payloads retain the pin for explicit pairing, separately
 /// from the candidate's untrusted descriptive metadata.
@@ -111,13 +137,15 @@ async fn probe(address: String, identity: &Identity) -> Device {
         Ok(info) => Device {
             name: info.name,
             platform: info.platform,
-            address,
+            addresses: vec![address],
+            fingerprint: Some(info.fingerprint),
             online: true,
         },
         Err(_) => Device {
             name: address.clone(),
             platform: "unknown".into(),
-            address,
+            addresses: vec![address],
+            fingerprint: None,
             online: false,
         },
     }
@@ -177,7 +205,7 @@ impl DiscoveryProvider for Tailscale {
             probe_addresses(
                 online
                     .into_iter()
-                    .map(|candidate| candidate.address)
+                    .flat_map(|candidate| candidate.addresses)
                     .collect(),
                 &self.identity,
             )
@@ -202,7 +230,8 @@ pub fn parse_tailscale_status(bytes: &[u8], port: u16) -> Result<Vec<Device>> {
                     devices.push(Device {
                         name: peer["HostName"].as_str().unwrap_or(&address).into(),
                         platform: peer["OS"].as_str().unwrap_or("unknown").into(),
-                        address,
+                        addresses: vec![address],
+                        fingerprint: None,
                         online: peer["Online"].as_bool().unwrap_or(false),
                     });
                 }
@@ -259,13 +288,15 @@ impl DiscoveryProvider for PeerList {
 pub struct Mdns {
     daemon: ServiceDaemon,
     duration: Duration,
+    identity: Arc<Identity>,
 }
 impl Mdns {
     /// Creates a LAN browser. Socket setup errors propagate to the frontend.
-    pub fn new(duration: Duration) -> Result<Self> {
+    pub fn new(duration: Duration, identity: Arc<Identity>) -> Result<Self> {
         Ok(Self {
             daemon: ServiceDaemon::new()?,
             duration,
+            identity,
         })
     }
     /// Advertises on all local interfaces; the fingerprint remains a TLS concern.
@@ -311,14 +342,28 @@ impl DiscoveryProvider for Mdns {
                             .get_property_val_str("platform")
                             .unwrap_or("unknown")
                             .into(),
-                        address,
+                        addresses: vec![address],
+                        fingerprint: None,
                         online: true,
                     });
                 }
             }
         }
         self.daemon.stop_browse(SERVICE)?;
-        Ok(devices.into())
+        let observed = stream::iter(devices)
+            .map(|mut candidate| async move {
+                let result = probe(candidate.addresses[0].clone(), &self.identity).await;
+                if result.online {
+                    result
+                } else {
+                    candidate.online = false;
+                    candidate
+                }
+            })
+            .buffer_unordered(PROBE_CONCURRENCY)
+            .collect::<Vec<_>>()
+            .await;
+        Ok(observed.into())
     }
 }
 
