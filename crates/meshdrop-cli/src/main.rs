@@ -81,10 +81,20 @@ async fn async_main() -> Result<()> {
     let config = Config::load(&args.config.unwrap_or(directory.join("config.toml")))?;
     let identity = Arc::new(Identity::load(&directory)?);
     let shutdown = CancellationToken::new();
-    let signals = tokio::spawn(signal(shutdown.clone()));
-    let result = run(args.command, config, directory, identity, shutdown).await;
-    signals.abort();
-    result
+    let mut signals = tokio::spawn(signal(shutdown.clone()));
+    let work = run(args.command, config, directory, identity, shutdown.clone());
+    tokio::pin!(work);
+    tokio::select! {
+        result = &mut work => { signals.abort(); result }
+        result = &mut signals => {
+            result??;
+            // Give transport cleanup time, even when an interactive terminal read blocks.
+            match tokio::time::timeout(Duration::from_secs(2), &mut work).await {
+                Ok(result) => result,
+                Err(_) => Ok(()),
+            }
+        }
+    }
 }
 async fn run(
     command: Command,

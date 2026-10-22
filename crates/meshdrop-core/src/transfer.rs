@@ -897,4 +897,65 @@ mod tests {
         assert_eq!(std::fs::read_dir(&h.receiver).unwrap().count(), 0);
         h.finish().await;
     }
+    #[tokio::test]
+    async fn sender_cancels_active_upload_and_removes_partial() {
+        let mut h = Harness::new(10).await;
+        std::fs::File::create(&h.source)
+            .unwrap()
+            .set_len(8 * 1024 * 1024)
+            .unwrap();
+        let client = h.client.clone();
+        let source = h.source.clone();
+        let token = CancellationToken::new();
+        let sending_token = token.clone();
+        let (tx, mut progress) = mpsc::channel(1);
+        let request = tokio::spawn(async move { client.send(&[source], tx, sending_token).await });
+        h.invitations
+            .recv()
+            .await
+            .unwrap()
+            .decision
+            .send(Decision::Accept)
+            .unwrap();
+        progress.recv().await.unwrap();
+        h.progress.recv().await.unwrap();
+        token.cancel();
+        assert!(
+            request
+                .await
+                .unwrap()
+                .unwrap_err()
+                .to_string()
+                .contains("cancelled")
+        );
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert_eq!(std::fs::read_dir(&h.receiver).unwrap().count(), 0);
+        h.finish().await;
+    }
+    #[tokio::test]
+    async fn unpaired_sender_cannot_offer() {
+        let h = Harness::new(10).await;
+        let identity = Identity::load(&h._directory.path().join("unpaired")).unwrap();
+        let client = Client::new(
+            h.client.address.trim_start_matches("https://"),
+            &identity,
+            None,
+            Duration::from_secs(2),
+        )
+        .unwrap();
+        let (tx, _rx) = mpsc::channel(1);
+        assert!(
+            client
+                .send(
+                    std::slice::from_ref(&h.source),
+                    tx,
+                    CancellationToken::new()
+                )
+                .await
+                .unwrap_err()
+                .to_string()
+                .contains("unpaired device")
+        );
+        h.finish().await;
+    }
 }

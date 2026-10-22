@@ -97,8 +97,10 @@ fn wait_listening(receiver: &Receiver) {
 }
 impl Drop for Receiver {
     fn drop(&mut self) {
-        self.process.kill().expect("kill receiver");
-        self.process.wait().expect("reap receiver");
+        if self.process.try_wait().expect("inspect receiver").is_none() {
+            self.process.kill().expect("kill receiver");
+            self.process.wait().expect("reap receiver");
+        }
     }
 }
 #[test]
@@ -177,5 +179,23 @@ fn large_transfer_keeps_receiver_child_below_96_mib() {
     assert!(
         high_water < 96 * 1024,
         "receiver child VmHWM {high_water} KiB"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn sigterm_stops_interactive_receiver_cleanly() {
+    let mut receiver = Receiver::start(false);
+    let signal = Command::new("kill")
+        .args(["-TERM", &receiver.process.id().to_string()])
+        .status()
+        .unwrap();
+    assert!(signal.success());
+    assert!(receiver.process.wait().unwrap().success());
+    assert_eq!(
+        fs::read_dir(receiver.directory.path().join("received"))
+            .unwrap()
+            .count(),
+        0
     );
 }
