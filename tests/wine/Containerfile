@@ -1,0 +1,10 @@
+FROM docker.io/library/rust:1-trixie
+RUN dpkg --add-architecture i386 && apt-get update && apt-get install -y --no-install-recommends gcc-mingw-w64-x86-64 wine wine32:i386 wine64 && rm -rf /var/lib/apt/lists/*
+RUN rustup target add x86_64-pc-windows-gnu
+ENV CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER=x86_64-w64-mingw32-gcc
+ENV CARGO_TARGET_X86_64_PC_WINDOWS_GNU_RUNNER=wine
+ENV WINEDEBUG=-all
+ENV WINEPREFIX=/tmp/meshdrop-wine
+RUN mkdir -p /workspace
+WORKDIR /workspace
+CMD ["cargo", "test", "--workspace", "--locked", "--target", "x86_64-pc-windows-gnu"]
