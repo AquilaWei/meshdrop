@@ -26,6 +26,9 @@ async fn desktop_request(
         }
         return Ok(serde_json::Value::Null);
     }
+    if operation == "open_receive_directory" && cfg!(target_os = "android") {
+        return Err("Opening receive folders is desktop-only; Android files are stored in app-private storage".into());
+    }
     if operation == "open_receive_directory" {
         let path = state
             .call("receive_directory", serde_json::Value::Null)
@@ -41,6 +44,7 @@ async fn desktop_request(
     state.call(&operation, payload).await
 }
 /// Starts the native shell; setup errors are shown by Tauri and abort startup.
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -49,7 +53,11 @@ pub fn run() {
         .setup(|app| {
             let (notices, mut events) = tokio::sync::mpsc::channel(16);
             let controller = tauri::async_runtime::block_on(Controller::start(
-                service::state_directory()?,
+                if cfg!(target_os = "android") {
+                    app.path().app_data_dir()?
+                } else {
+                    service::state_directory()?
+                },
                 notices,
             ))?;
             app.manage(controller.clone());

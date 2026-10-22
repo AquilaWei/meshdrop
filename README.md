@@ -72,6 +72,13 @@ file, so successfully completed files remain if a later file fails.
 
 ## Contribute and verify
 
+Android development uses a user-owned compatible JDK, SDK and NDK; set
+`JAVA_HOME`, `ANDROID_HOME` and `NDK_HOME` to those installations. For example,
+`JAVA_HOME=$HOME/.local/share/meshdrop-android/jdk-17` can be reused by scripts.
+From `crates/meshdrop-app`, run `cargo tauri android build --debug --target x86_64`.
+No host system packages or release signing keys are installed by this project.
+
+
 ```sh
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
@@ -134,3 +141,16 @@ Anyway**, authenticate, and confirm Open. No signing or release is performed her
 
 Native appearance and notification permissions still need the checks in
 [the acceptance checklist](docs/acceptance.md).
+
+## Android app
+
+The Android target shares the same core and static interface. Build a debug APK
+using the development command above, then install the generated debug APK with
+`adb install -r PATH_TO_DEBUG_APK`, or open it on your device and explicitly allow
+installation from that source. Only Gradle's automatic debug key is used.
+
+Received files land in app-private storage without broad storage permission;
+uninstalling the app deletes that storage. Native file sharing and background
+reception integration are being added in this stage and are not yet verified.
+Tailscale enumeration and desktop folder opening are unavailable on Android;
+use a manual private VPN address instead. The receive path is shown in Settings.

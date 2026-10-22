@@ -116,6 +116,11 @@ async function poll() {
   try {
     const state = await request('snapshot');
     $('#my-name').textContent = state.name;
+    if (state.platform === 'android') {
+      $('#open-folder').disabled = true; $('#open-folder').title = 'Desktop-only. Android receives into app-private storage.';
+      const tailscale = document.querySelector('[name=provider][value=tailscale]');
+      tailscale.disabled = true; tailscale.parentNode.title = 'Desktop-only. Use manual VPN addresses on Android.';
+    }
     $('#fingerprint').textContent = state.fingerprint;
     $('#qr-content').textContent = state.qr_content;
     $('#service-state').textContent = `Receiving on port ${state.port}`;

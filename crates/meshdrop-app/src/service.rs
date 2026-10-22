@@ -35,7 +35,11 @@ impl Controller {
     pub async fn start(directory: PathBuf, notices: mpsc::Sender<Notice>) -> Result<Self> {
         let folder = directory.clone();
         let (config, identity) = tokio::task::spawn_blocking(move || {
-            let config = Config::load(&folder.join("config.toml"))?;
+            let config = platform_config(
+                Config::load(&folder.join("config.toml"))?,
+                &folder,
+                cfg!(target_os = "android"),
+            );
             let identity = Arc::new(Identity::load(&folder)?);
             Ok::<_, anyhow::Error>((config, identity))
         })
@@ -417,6 +421,7 @@ impl Actor {
     }
     fn snapshot(&self) -> Result<Value> {
         let mut view = self.view.clone();
+        view["platform"] = json!(std::env::consts::OS);
         view["name"] = json!(self.session.config.name);
         view["fingerprint"] = json!(self.session.identity.fingerprint());
         view["port"] = json!(self.session.port);
@@ -529,6 +534,7 @@ impl Session {
                             Err(error) => setup_problems
                                 .push(json!({"provider":"mdns", "error":format!("{error:#}")})),
                         },
+                        "tailscale" if cfg!(target_os = "android") => setup_problems.push(json!({"provider":"tailscale", "error":"Tailscale discovery is desktop-only; use a manual VPN address on Android"})),
                         "tailscale" => providers.push(Box::new(Tailscale {
                             identity: self.identity.clone(),
                             port: self.port,
@@ -687,6 +693,41 @@ async fn local_address(peer: &str, port: u16) -> Result<String> {
     socket.connect(destination).await?;
     Ok(std::net::SocketAddr::new(socket.local_addr()?.ip(), port).to_string())
 }
+/// Resolves private relative destinations inside the selected Android profile.
+/// Desktop paths remain compatible with the CLI; actual filesystem failures propagate.
+pub fn platform_config(mut config: Config, directory: &std::path::Path, android: bool) -> Config {
+    if android && config.receive_directory.is_relative() {
+        config.receive_directory = directory.join(&config.receive_directory);
+    }
+    config
+}
+
+#[cfg(test)]
+mod android_policy_tests {
+    use super::*;
+    #[test]
+    fn android_default_destination_is_inside_private_profile() {
+        let config = platform_config(
+            Config::default(),
+            std::path::Path::new("/private/meshdrop"),
+            true,
+        );
+        assert_eq!(
+            config.receive_directory,
+            PathBuf::from("/private/meshdrop/received")
+        );
+    }
+    #[test]
+    fn desktop_default_destination_remains_cli_compatible() {
+        let config = platform_config(
+            Config::default(),
+            std::path::Path::new("/private/meshdrop"),
+            false,
+        );
+        assert_eq!(config.receive_directory, PathBuf::from("received"));
+    }
+}
+
 /// Resolves an explicit state directory for isolated profiles, or platform defaults.
 pub fn state_directory() -> Result<PathBuf> {
     std::env::var_os("MESHDROP_STATE_DIR")

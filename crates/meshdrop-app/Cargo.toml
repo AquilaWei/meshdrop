@@ -3,6 +3,9 @@ name = "meshdrop-app"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+[lib]
+crate-type = ["staticlib", "cdylib", "rlib"]
+
 [lints]
 workspace = true
 [build-dependencies]
