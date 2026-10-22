@@ -18,3 +18,20 @@ jobs:
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace
       - run: cargo build -p meshdrop-app --locked
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+      - run: sdkmanager 'platforms;android-36' 'build-tools;36.0.0' 'ndk;28.2.13676358'
+      - run: cargo install tauri-cli --locked --version 2.11.4
+      - name: Build Android debug APK
+        working-directory: crates/meshdrop-app
+        run: NDK_HOME="$ANDROID_HOME/ndk/28.2.13676358" cargo tauri android build --debug --target aarch64

@@ -95,7 +95,8 @@ multicast discovery, explicit pairing, bidirectional transfer hashes and rejecti
 The Windows suite runs core and CLI tests in Wine; Linux-only `/proc` VmHWM
 measurement is excluded by target configuration. Real Windows, macOS and multicast
 LAN behavior still need the [acceptance checklist](docs/acceptance.md). CI verifies
-fmt, clippy and tests on Ubuntu, Windows and macOS after a future authorized push.
+fmt, clippy and tests on Ubuntu, Windows and macOS, plus an Android debug APK
+build job, after a future authorized push. Hosted jobs have not run.
 
 The Xvfb/WebDriver suite drives seven desktop scenarios against real CLI peers.
 Its chooser-result injection and native UI limits are documented in
