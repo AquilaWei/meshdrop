@@ -70,6 +70,8 @@ pub enum Decision {
 /// Frontends receive invitations through a bounded channel and own the decision.
 #[derive(Debug)]
 pub struct Invitation {
+    /// Stable handle shared with receive progress and cancellation.
+    pub transfer: String,
     pub peer: String,
     /// Untrusted display name; the certificate fingerprint remains the identity.
     pub peer_name: String,
@@ -83,9 +85,19 @@ pub enum InvitationKind {
     Pair { code: String },
     Files(Vec<FileOffer>),
 }
+/// Completion is emitted only after integrity verification and durable publication.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ProgressStatus {
+    Uploading,
+    Complete,
+    Failed,
+}
 /// Bounded progress events can be rendered by any frontend without polling files.
 #[derive(Clone, Debug)]
 pub struct Progress {
+    pub status: ProgressStatus,
+    pub detail: Option<String>,
     pub transfer: String,
     pub name: String,
     pub bytes: u64,
@@ -287,6 +299,7 @@ async fn decide(
     s: &ServerState,
     peer: String,
     peer_name: String,
+    transfer: String,
     kind: InvitationKind,
     cancel: CancellationToken,
 ) -> Result<()> {
@@ -297,6 +310,7 @@ async fn decide(
             .send(Invitation {
                 peer,
                 peer_name,
+                transfer,
                 kind,
                 decision: tx,
                 cancel: cancel.clone(),
@@ -321,6 +335,7 @@ async fn pair(
         &s,
         peer.clone(),
         request.name,
+        Uuid::new_v4().to_string(),
         InvitationKind::Pair { code },
         CancellationToken::new(),
     )
@@ -353,16 +368,17 @@ async fn offer(
         }
     }
     let cancel = CancellationToken::new();
+    let id = Uuid::new_v4().to_string();
     decide(
         &s,
         peer.clone(),
         request.name,
+        id.clone(),
         InvitationKind::Files(request.files.clone()),
         cancel.clone(),
     )
     .await
     .map_err(api_error)?;
-    let id = Uuid::new_v4().to_string();
     s.inner.lock().map_err(api_error)?.active.insert(
         id.clone(),
         Active {
@@ -498,6 +514,8 @@ async fn upload(
             .await?;
             s.progress
                 .send(Progress {
+                    status: ProgressStatus::Uploading,
+                    detail: None,
                     transfer: id.clone(),
                     name: file.name.clone(),
                     bytes,
@@ -514,6 +532,21 @@ async fn upload(
         Ok::<_, anyhow::Error>(path.display().to_string())
     };
     let result = tokio::select! { _ = cancel.cancelled() => Err(anyhow::anyhow!("transfer cancelled")), result = receive => result };
+    s.progress
+        .send(Progress {
+            status: if result.is_ok() {
+                ProgressStatus::Complete
+            } else {
+                ProgressStatus::Failed
+            },
+            detail: result.as_ref().err().map(|error| format!("{error:#}")),
+            transfer: id.clone(),
+            name: file.name.clone(),
+            bytes: if result.is_ok() { file.size } else { 0 },
+            total: file.size,
+        })
+        .await
+        .map_err(api_error)?;
     let mut inner = s.inner.lock().map_err(api_error)?;
     if let Some(active) = inner.active.get_mut(&id) {
         active.uploading -= 1;
@@ -716,6 +749,8 @@ impl Client {
                 let bytes = bytes;
                 async move {
                     tx.send(Progress {
+                        status: ProgressStatus::Uploading,
+                        detail: None,
                         transfer,
                         name,
                         bytes,
@@ -943,6 +978,26 @@ mod tests {
         assert!(format!("{invitation:?}").contains("Sender desktop"));
         invitation.decision.send(Decision::Accept).unwrap();
         assert!(request.await.unwrap().status().is_success());
+        h.finish().await;
+    }
+    #[tokio::test]
+    async fn receiver_reports_verified_completion_after_bytes() {
+        let mut h = Harness::new(10).await;
+        let client = h.client.clone();
+        let source = h.source.clone();
+        let (tx, mut rx) = mpsc::channel(16);
+        let request =
+            tokio::spawn(async move { client.send(&[source], tx, CancellationToken::new()).await });
+        let invitation = h.invitations.recv().await.unwrap();
+        invitation.decision.send(Decision::Accept).unwrap();
+        request.await.unwrap().unwrap();
+        assert_eq!(rx.recv().await.unwrap().bytes, 5);
+        assert_eq!(h.progress.recv().await.unwrap().bytes, 5);
+        let completed = tokio::time::timeout(Duration::from_millis(100), h.progress.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(format!("{completed:?}").contains("Complete"));
         h.finish().await;
     }
     #[tokio::test]
