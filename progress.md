@@ -1,6 +1,6 @@
 # meshdrop progress
 
-Stage 1 implementation and automated verification are complete. The new orphan
+Stages 1 and 2 implementation and automated verification are complete. The new orphan
 history is on `hb/19-linux-windows-ios-macos-airdro`; no legacy crates or prior
 commits were carried into it. No push, tag, release, master update or main-worktree
 edit was performed.
@@ -12,8 +12,8 @@ pinned HTTPS; channel-based pairing/file decisions; bounded streaming/progress;
 multiple files; both-side cancellation and disconnect cleanup; mDNS, Tailscale,
 peer-list and manual/QR discovery; Linux/Windows/macOS verification CI.
 
-Automated results: Linux workspace 53 tests; three-container discovery/pairing/
-transfer/rejection 4 scenarios; Windows target in Wine 51 tests. The Linux-only
+Automated results: Linux workspace 67 tests; three-container discovery/pairing/
+transfer/rejection 4 scenarios; Windows target in Wine 53 tests. The Linux-only
 VmHWM and Unix-only SIGTERM tests are excluded from the Windows target, with
 reasons in `tests/wine/README.md`. Exact commands and results are recorded in
 `docs/verification.md`. Hosted CI has not run because no push was authorized.
@@ -44,8 +44,18 @@ against the same state directory are not coordinated across processes; perform
 pairing sequentially. Abrupt power failure cleanup is not guaranteed. There is
 no resumable transfer protocol in this stage.
 
-Next: Tauri interface and notifications, then Android app/foreground service.
-No UI, Android, iOS, Bluetooth or Taildrop implementation is included here.
-Physical-device steps and expected results are in `docs/acceptance.md`. Real
-Windows/macOS terminals, real LAN multicast/VPN routing and storage unplug/sleep
-behavior remain unverified. Do not describe them as physically tested.
+Stage 2 adds the Tauri desktop shell with static HTML/CSS/JS, CSP and text-only
+untrusted names. A bounded message-driven Rust controller runs core reception and
+mDNS in the same process, handles explicit pairing and transfer decisions,
+streams progress/cancellation, posts native notifications and saves strict TOML
+settings atomically. Twelve controller tests and seven real WebDriver scenarios
+exercise the app with CLI peers. Windows app compilation is checked separately
+from the 53 Wine core/CLI tests; WebView2 runtime remains native-only.
+
+Next: Android app/foreground service. No Android, iOS, Bluetooth or Taildrop
+implementation is included here. Physical steps and expected results are in
+`docs/acceptance.md`: GNOME/KDE notifications, Windows WebView2/firewall/picker,
+macOS unsigned first launch and notifications, real LAN/VPN and storage behavior.
+The native chooser is represented by injected chooser results in WebDriver.
+Hosted CI has not run. Network/folder settings require restart; notification
+preferences apply immediately. No push, tag or master change was performed.

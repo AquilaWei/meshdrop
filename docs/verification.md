@@ -1,4 +1,4 @@
-# Stage-one automated verification
+# Automated verification through desktop stage two
 
 Commands run locally, without a push or hosted CI:
 
@@ -6,14 +6,24 @@ Commands run locally, without a push or hosted CI:
 cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace
 ./tests/docker/run.sh
 ./tests/wine/run.sh
+./tests/ui/run.sh
 ```
 
 | Suite | Actual result |
 |---|---|
 | fmt / clippy | Pass; clippy warnings denied |
-| Linux workspace | 53 passed, 0 failed: CLI processes 5, transport 21, discovery 11, identity 4, storage/config/network 12 |
+| Linux workspace | 67 passed, 0 failed: desktop state 12, CLI processes 5, transport 23, discovery 11, identity 4, storage/config/network 12 |
 | Rootless Podman, three Ubuntu containers | 4 scenarios passed, 0 failed: mutual mDNS discovery, explicit pairing, bidirectional SHA-256 transfer, rejection without content |
-| Windows GNU target, containerized Wine | 51 passed, 0 failed: CLI processes 3, transport 21, discovery 11, identity 4, storage/config/network 12 |
+| Windows GNU target, containerized Wine | 53 passed, 0 failed: CLI processes 3, transport 23, discovery 11, identity 4, storage/config/network 12 |
+
+Desktop WebDriver: 7 scenarios passed, 0 failed, with real CLI peers under Xvfb.
+Windows desktop: compile-only `cargo check -p meshdrop-app --locked --target
+x86_64-pc-windows-gnu`; desktop state tests run on Linux, not in Wine.
+
+Logs for this delivery are `/tmp/meshdrop-stage2-verify.log`,
+`/tmp/meshdrop-stage2-docker.log`, `/tmp/meshdrop-stage2-wine.log` and
+`/tmp/meshdrop-stage2-ui.log`. The UI runner also repeats workspace fmt, Clippy,
+67 Rust tests and binary builds inside its container.
 
 The Linux process test transfers a sparse 128-MiB source through the real CLI and
 checks the receiving child process's own VmHWM is below 96 MiB. This measures the
@@ -65,3 +75,22 @@ HEAD. Additional coverage tests for already-correct cases also pass.
 Verification commands above completed with exit code 0. Container execution used
 rootless Podman. Windows excluded only the same two target-specific tests listed
 in `tests/wine/README.md`; none of the new regressions were excluded.
+
+## Desktop implementation evidence
+
+Before the respective changes, sender-name propagation failed its assertion,
+receive completion timed out waiting for a verified-completion event, and the
+old desktop controller rejected the newly introduced discovery, transfer and
+settings commands. Those observations are retained in
+`/tmp/meshdrop-app-{metadata,completion,discovery,transfers,settings}-red.log`.
+The corresponding feature commits include their tests. Twelve desktop state tests
+cover receiver lifecycle, invalid configuration, partial discovery, accepted and
+rejected pairing, fingerprint mismatch, accepted/rejected/cancelled transfers,
+and strict persistent notification settings.
+
+The seven WebDriver scenarios cover startup/discovery/QR, explicit in-app pairing,
+app-to-CLI progress and SHA-256, CLI-to-app acceptance and SHA-256, rejection
+cleanup, text-only rendering and invalid TOML preservation. WebDriver supplies
+chooser results through the existing command; GTK native chooser interaction is
+not automated. Dunst provides notification transport; native GNOME/KDE appearance,
+Windows WebView2 and macOS integration remain in the physical checklist.

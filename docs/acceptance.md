@@ -10,7 +10,15 @@ Only checks not established by local/Wine/container simulation are listed here.
 | Tailscale / ZeroTier / WireGuard deployment | Enable the optional Tailscale provider on a Tailscale host; use manual addresses for other VPNs. Pair and transfer through the actual VPN routing/firewall policy. | Tailscale enumerates and probes actual peers; other routed private addresses work independently of Tailscale; unreachable peers show offline/errors. |
 | OS shutdown and storage behavior | Cancel transfers during sleep, unplug an external destination drive, and retry on its actual filesystem. | No existing file is replaced; errors are visible; temporary files are removed where the filesystem remains accessible. Abrupt power loss may leave hidden temporary files and is not an orderly cancellation. |
 
-Next stages: Tauri UI and native notifications, then Android foreground service
-and Android interoperability. Their UI/permission/battery behavior is not part of
-this CLI stage. Future unsigned macOS app bundles need a documented first-launch
-Finder Open procedure; there is no app bundle to approve in this stage.
+## Desktop integration
+
+| Environment | Steps | Expected result |
+|---|---|---|
+| Fedora GNOME and KDE (test both) | Start the app, pair a CLI peer, minimize the app and send an offer. Accept in the app; repeat with notifications disabled in Settings. | Native notification appears with notifications enabled; dialog shows sender, filename and size; disabled notifications leave the dialog functional. No implicit acceptance. |
+| Native Windows | Launch the app with WebView2 installed; allow its firewall prompt on private networks only. Pair and transfer both ways, select multiple files in the native chooser, cancel, and open the receive folder. Test notification permissions. | Interface, picker, progress and notifications work; private-network peers connect; cancellation removes partial files and folder opening uses Explorer. Public sources remain rejected. |
+| Native macOS | Open an unsigned bundle using Finder right-click → Open; if blocked use System Settings → Privacy & Security → Open Anyway. Allow notifications, pair and transfer in both directions, select files and open the destination. | App opens after explicit approval; native layout, picker, notifications and Finder integration work; no signing is claimed. |
+| Desktop lifecycle | Close the window during a slow transfer, reopen, then change settings and restart. | Receiver and advertisement stop cleanly; partial files are removed; saved port/folder/provider settings apply after restart and identity persists. |
+
+Container WebDriver injects native chooser results; actual chooser interaction,
+GNOME/KDE presentation, Windows WebView2 and macOS integration are not physically
+verified. Android foreground service and interoperability are the next stage.

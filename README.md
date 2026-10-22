@@ -2,14 +2,14 @@
 
 **Private-network file invitations for Linux, Windows and macOS.** No cloud,
 public CA or Tailscale account required. The Rust core is shared by the CLI and
-future Tauri/Android frontends. GPL-3.0-or-later; see [LICENSE](LICENSE).
+Tauri desktop app; Android is planned next. GPL-3.0-or-later; see [LICENSE](LICENSE).
 
 ## Try it
 
 Install stable Rust with Cargo, then:
 
 ```sh
-cargo build --workspace --locked
+cargo build -p meshdrop-cli --locked
 cargo run --bin meshdrop -- --help
 # On the receiving machine (leave this running):
 cargo run --bin meshdrop -- receive
@@ -79,6 +79,7 @@ cargo test --workspace
 # Rootless Podman by default; CONTAINER_ENGINE=docker selects Docker:
 ./tests/docker/run.sh
 ./tests/wine/run.sh
+./tests/ui/run.sh
 ```
 
 Container scripts download images and build dependencies inside containers. Wine
@@ -89,13 +90,14 @@ measurement is excluded by target configuration. Real Windows, macOS and multica
 LAN behavior still need the [acceptance checklist](docs/acceptance.md). CI verifies
 fmt, clippy and tests on Ubuntu, Windows and macOS after a future authorized push.
 
-For macOS, this stage supplies source/CLI only. A locally built unsigned CLI can
-be run from Terminal. Future unsigned app bundles will require Finder →
-right-click → Open on first launch; that UI is outside this stage.
+The Xvfb/WebDriver suite drives seven desktop scenarios against real CLI peers.
+Its chooser-result injection and native UI limits are documented in
+[tests/ui/README.md](tests/ui/README.md). Wine also checks the Windows app target;
+WebView2 UI execution requires native Windows.
 
 See [protocol](docs/protocol.md), [progress](progress.md), and
-[feature list](feature_list.json). Tauri and Android are planned next; iOS,
-Bluetooth and Taildrop compatibility are outside scope.
+[feature list](feature_list.json). Android is planned next; iOS, Bluetooth and
+Taildrop compatibility are outside scope.
 
 ## Desktop app (Tauri 2)
 
@@ -105,7 +107,8 @@ Windows needs the native Rust toolchain and WebView2, macOS needs Xcode tools.
 No host packages are installed by the repository scripts.
 
 ```sh
-cargo run -p meshdrop-app
+cargo build -p meshdrop-app --locked
+cargo run -p meshdrop-app --locked
 ```
 
 The window starts the core receiver and mDNS advertisement in the same process;
@@ -122,6 +125,12 @@ file path in the error. `notifications_enabled` toggles desktop notifications
 immediately. Restart after changing the receive folder, port, providers, networks
 or either timeout. Closing the app stops its background receiver.
 
-On macOS, the app is unsigned: **right-click → Open** the first time, then confirm
-Open in the system dialog. Native appearance and notification permissions still
-need the checks in `docs/acceptance.md`.
+On Linux, launch `./target/debug/meshdrop-app`; on Windows, launch
+`target\debug\meshdrop-app.exe` (WebView2 must be installed). On macOS, run
+`./target/debug/meshdrop-app` from Terminal. For an unsigned `.app` bundle,
+open Finder and **right-click → Open** on first launch, then confirm Open.
+If Gatekeeper blocks it, go to **System Settings → Privacy & Security → Open
+Anyway**, authenticate, and confirm Open. No signing or release is performed here.
+
+Native appearance and notification permissions still need the checks in
+[the acceptance checklist](docs/acceptance.md).

@@ -1,10 +1,10 @@
 {
   "project": "meshdrop",
-  "stage": 1,
+  "stage": 2,
   "implementation": "complete",
   "automated_verification": {
     "linux_workspace": {
-      "passed": 53,
+      "passed": 67,
       "failed": 0
     },
     "three_container_scenarios": {
@@ -12,10 +12,15 @@
       "failed": 0
     },
     "windows_target_wine": {
-      "passed": 51,
+      "passed": 53,
       "failed": 0
     },
-    "hosted_ci": "configured; not run; no push"
+    "hosted_ci": "configured; not run; no push",
+    "desktop_webdriver": {
+      "passed": 7,
+      "failed": 0
+    },
+    "windows_app_compile": "cargo check; see docs/verification.md"
   },
   "features": [
     {
@@ -57,10 +62,29 @@
     {
       "name": "real_process_transfer_and_child_memory_test",
       "status": "complete"
+    },
+    {
+      "name": "tauri_static_desktop_receiver",
+      "status": "complete"
+    },
+    {
+      "name": "desktop_discovery_identity_qr_and_pairing",
+      "status": "complete"
+    },
+    {
+      "name": "desktop_multi_device_transfers_and_notifications",
+      "status": "complete"
+    },
+    {
+      "name": "strict_desktop_settings",
+      "status": "complete"
+    },
+    {
+      "name": "xvfb_webdriver_cli_interoperability",
+      "status": "complete"
     }
   ],
   "next_stages": [
-    "Tauri interface and notifications",
     "Android app and foreground service"
   ],
   "physical_acceptance": "docs/acceptance.md",
@@ -69,13 +93,15 @@
     "Unresolved discovery candidates group by address; observed identities group by fingerprint",
     "Pair sequentially when sharing a state directory across processes",
     "No guaranteed partial-file cleanup after abrupt power loss",
-    "No resumable transfers"
+    "No resumable transfers",
+    "Desktop network and receive-folder settings require restart; notification toggle applies immediately",
+    "Native file chooser presentation and GNOME/KDE/Windows/macOS integration require physical acceptance",
+    "WebView2 app runtime is not executed in Wine"
   ],
   "excluded": [
     "iOS",
     "Bluetooth",
     "Taildrop interoperability",
-    "UI in this stage",
     "Android in this stage"
   ],
   "review_corrections": {

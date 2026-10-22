@@ -1,5 +1,14 @@
 # Changelog
 
+## Desktop stage-two development
+
+- Add a Tauri 2 desktop app using static HTML, CSS and JavaScript.
+- Receive in the background, discover peers and show provider diagnostics and identity QR.
+- Confirm pairing on both devices; send to multiple paired devices with progress and cancellation.
+- Show incoming dialogs and system notifications; save strict TOML settings and notification preferences.
+- Add twelve Rust desktop state tests, seven Xvfb/WebDriver scenarios and Windows app compile checks.
+- Document native platform acceptance and unsigned macOS first launch.
+
 ## Review corrections
 
 - Separate invitation waiting from upload idle timeouts so active large transfers continue.
