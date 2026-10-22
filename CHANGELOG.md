@@ -3,6 +3,11 @@
 ## Review corrections
 
 - Separate invitation waiting from upload idle timeouts so active large transfers continue.
+- Preserve device results when providers or known peers fail, with diagnostics on stderr.
+- Probe at most sixteen endpoints concurrently and group devices by certificate identity while retaining addresses.
+- Handle individual accept/connection failures without stopping reception.
+- Move receive and trust-store disk work off the async executor; bound filename collision retries.
+- Add Tailscale fixtures, real partial peer-list tests and regression verification for every review item.
 
 ## Initial stage-one development
 

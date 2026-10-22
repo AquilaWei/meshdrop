@@ -57,10 +57,13 @@ name = "my-laptop"
 
 Add `"tailscale"` to providers for optional local `tailscale status --json`
 discovery. Missing tools return a reason. Manual candidates can be passed to
-`devices host:9843`. Discovery groups successful probes by TLS fingerprint and preserves all observed
-addresses. Unresolved candidates fall back to address grouping. Discovery does
-not automatically trust candidates. Peer-list
-requires reachable, already paired devices. Provider failures are diagnostics on stderr; usable devices remain on stdout.
+`devices host:9843`. Discovery groups successful probes by TLS fingerprint and
+preserves all observed addresses. Unresolved candidates fall back to address
+grouping. Discovery does not automatically trust candidates. Peer-list queries
+already paired devices; an unreachable peer does not hide other results.
+Provider failures are diagnostics on stderr; usable devices remain on stdout.
+Probes run concurrently with a limit of sixteen; Tailscale offline peers are
+listed without probing.
 Invitation timeout limits confirmation waiting; idle timeout limits gaps between
 received chunks and accepted uploads that never start. Sustained transfers have
 no total-duration limit. The old `timeout_seconds` key is rejected; replace it

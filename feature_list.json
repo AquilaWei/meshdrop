@@ -3,32 +3,90 @@
   "stage": 1,
   "implementation": "complete",
   "automated_verification": {
-    "linux_workspace": {"passed": 36, "failed": 0},
-    "three_container_scenarios": {"passed": 4, "failed": 0},
-    "windows_target_wine": {"passed": 34, "failed": 0},
+    "linux_workspace": {
+      "passed": 53,
+      "failed": 0
+    },
+    "three_container_scenarios": {
+      "passed": 4,
+      "failed": 0
+    },
+    "windows_target_wine": {
+      "passed": 51,
+      "failed": 0
+    },
     "hosted_ci": "configured; not run; no push"
   },
   "features": [
-    {"name": "workspace_license_docs_ci", "status": "complete"},
-    {"name": "safe_sink_and_filename_policy", "status": "complete"},
-    {"name": "private_network_allowlist", "status": "complete"},
-    {"name": "identity_explicit_pairing_and_pinning", "status": "complete"},
-    {"name": "invitations_streaming_progress_cancel_integrity", "status": "complete"},
-    {"name": "multi_file_offer", "status": "complete"},
-    {"name": "four_pluggable_discovery_providers", "status": "complete"},
-    {"name": "strict_portable_toml_configuration", "status": "complete"},
-    {"name": "five_cli_subcommands_and_signals", "status": "complete"},
-    {"name": "real_process_transfer_and_child_memory_test", "status": "complete"}
+    {
+      "name": "workspace_license_docs_ci",
+      "status": "complete"
+    },
+    {
+      "name": "safe_sink_and_filename_policy",
+      "status": "complete"
+    },
+    {
+      "name": "private_network_allowlist",
+      "status": "complete"
+    },
+    {
+      "name": "identity_explicit_pairing_and_pinning",
+      "status": "complete"
+    },
+    {
+      "name": "invitations_streaming_progress_cancel_integrity",
+      "status": "complete"
+    },
+    {
+      "name": "multi_file_offer",
+      "status": "complete"
+    },
+    {
+      "name": "four_pluggable_discovery_providers",
+      "status": "complete"
+    },
+    {
+      "name": "strict_portable_toml_configuration",
+      "status": "complete"
+    },
+    {
+      "name": "five_cli_subcommands_and_signals",
+      "status": "complete"
+    },
+    {
+      "name": "real_process_transfer_and_child_memory_test",
+      "status": "complete"
+    }
   ],
-  "next_stages": ["Tauri interface and notifications", "Android app and foreground service"],
+  "next_stages": [
+    "Tauri interface and notifications",
+    "Android app and foreground service"
+  ],
   "physical_acceptance": "docs/acceptance.md",
   "known_limits": [
     "Per-file commit rather than all-or-nothing multi-file rollback",
-    "Configurable overall session and upload timeout",
-    "Discovery deduplicates socket addresses",
+    "Unresolved discovery candidates group by address; observed identities group by fingerprint",
     "Pair sequentially when sharing a state directory across processes",
     "No guaranteed partial-file cleanup after abrupt power loss",
     "No resumable transfers"
   ],
-  "excluded": ["iOS", "Bluetooth", "Taildrop interoperability", "UI in this stage", "Android in this stage"]
+  "excluded": [
+    "iOS",
+    "Bluetooth",
+    "Taildrop interoperability",
+    "UI in this stage",
+    "Android in this stage"
+  ],
+  "review_corrections": {
+    "separate_invitation_and_idle_timeouts": "complete; sustained transfers have no aggregate deadline",
+    "partial_discovery_reports": "complete; per-provider and per-peer diagnostics",
+    "tailscale_and_real_peer_list_tests": "complete",
+    "bounded_concurrent_probes": "complete; limit 16",
+    "fingerprint_identity_and_multiple_addresses": "complete",
+    "accept_and_connection_failure_isolation": "complete",
+    "blocking_storage_isolation": "complete; one awaited chunk at a time",
+    "collision_attempt_limit": "complete; 10000 candidates",
+    "regression_evidence": "docs/verification.md"
+  }
 }

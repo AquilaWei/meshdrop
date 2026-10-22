@@ -50,6 +50,10 @@ resetting after bytes arrive. Accepted transfers waiting to start a file expire
 only while no upload is active; the expiry task never cancels active uploads.
 There is no total transfer-duration deadline. Clients also avoid aggregate
 upload request timeouts; control requests retain deadlines.
+Blocking storage and trust operations run on the blocking pool; each chunk write
+is awaited before polling the body again. Filename collision retries stop after
+10,000 candidates. Accept errors and individual connection-task failures are
+logged and isolated from the listener.
 Progress indicates locally processed bytes; success is the final HTTP response,
 not the last progress event. Multi-file transfers commit each file separately:
 a later failure leaves earlier verified, completed files intact.
@@ -59,7 +63,9 @@ a later failure leaves earlier verified, completed files intact.
 Providers are independent of transport: DNS-SD `_meshdrop._tcp.local.`, local
 `tailscale status --json` plus info probes, authenticated peer lists, and manual
 addresses/QR. Results of successful info probes merge by observed certificate fingerprint,
-preserving all addresses. Unresolved candidates merge by address. mDNS metadata
+preserving all addresses. Unresolved candidates merge by address. Provider and
+per-peer failures are diagnostics alongside remaining results. Tailscale peers
+marked offline are not probed. mDNS metadata
 is descriptive and does not establish trust. Probe concurrency is bounded to 16.
 Discovery never implicitly pairs devices. mDNS is limited to a multicast domain;
 VPN connectivity does not imply multicast forwarding.
