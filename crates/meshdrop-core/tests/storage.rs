@@ -77,3 +77,24 @@ fn unknown_configuration_key_reports_path() {
             .contains(&path.display().to_string())
     );
 }
+
+fn occupy_collision_candidates(directory: &std::path::Path) {
+    std::fs::write(directory.join("full.txt"), b"existing").unwrap();
+    for number in 1..10_000 {
+        std::fs::write(directory.join(format!("full ({number}).txt")), b"existing").unwrap();
+    }
+}
+#[test]
+fn exhausted_collision_candidates_fail_and_remove_temporary_file() {
+    let directory = tempfile::tempdir().unwrap();
+    occupy_collision_candidates(directory.path());
+    let mut sink = Sink::new(directory.path(), "full.txt").unwrap();
+    sink.write(b"new").unwrap();
+    let result = sink.finish(3, &hex::encode(Sha256::digest(b"new")));
+    assert!(result.unwrap_err().to_string().contains("collision limit"));
+    assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 10_000);
+    assert_eq!(
+        std::fs::read(directory.path().join("full.txt")).unwrap(),
+        b"existing"
+    );
+}

@@ -95,7 +95,8 @@ impl Sink {
         Ok(())
     }
     /// Verifies bytes and publishes atomically without replacing existing files.
-    /// Size or digest mismatch removes the temporary file and returns an error.
+    /// Size/digest mismatch or 10,000 occupied candidates removes the temporary
+    /// file and returns an error rather than retrying indefinitely.
     pub fn finish(self, size: u64, digest: &str) -> Result<PathBuf> {
         self.finish_if(size, digest, || true)
     }
@@ -113,8 +114,7 @@ impl Sink {
             bail!("transfer cancelled");
         }
         self.temp.as_file_mut().sync_all()?;
-        let mut number = 0u64;
-        loop {
+        for number in 0..10_000 {
             let name = if number == 0 {
                 self.name.clone()
             } else {
@@ -131,10 +131,10 @@ impl Sink {
                 Ok(_) => return Ok(destination),
                 Err(e) if e.error.kind() == std::io::ErrorKind::AlreadyExists => {
                     self.temp = e.file;
-                    number += 1;
                 }
                 Err(e) => return Err(e.error.into()),
             }
         }
+        bail!("filename collision limit (10000 candidates) exhausted")
     }
 }
