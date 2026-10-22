@@ -2,7 +2,7 @@
 
 Run `./tests/wine/run.sh` from the checkout. It builds MinGW and Wine inside a
 container, copies source without Git metadata/build artifacts/private directories,
-and runs `cargo test --workspace --locked --target x86_64-pc-windows-gnu` with the
+and runs `cargo test --workspace --exclude meshdrop-app --locked --target x86_64-pc-windows-gnu` with the
 Wine Cargo runner. The script propagates the container's exit code.
 
 The Windows target runs the full core suite plus the CLI identity, rejection and
@@ -17,3 +17,12 @@ bidirectional process tests. Two target-specific tests are not compiled:
 
 Wine cannot establish native Windows firewall, antivirus, console or NTFS ACL
 behavior. See `docs/acceptance.md`; no host Wine installation is needed.
+
+## Desktop app compile check
+
+The same container also runs `tests/wine/inside.sh`, which after the core and CLI
+tests executes `cargo check -p meshdrop-app --locked --target x86_64-pc-windows-gnu`.
+This checks the Tauri 2 desktop crate for the Windows target with MinGW. It does not
+run the app: WebView2 cannot start under Wine, so the Windows window, notifications,
+firewall prompt and native file dialog remain physical-device checks in
+`docs/acceptance.md`.

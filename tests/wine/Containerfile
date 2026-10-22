@@ -7,4 +7,4 @@ ENV WINEDEBUG=-all
 ENV WINEPREFIX=/tmp/meshdrop-wine
 RUN mkdir -p /workspace
 WORKDIR /workspace
-CMD ["cargo", "test", "--workspace", "--locked", "--target", "x86_64-pc-windows-gnu"]
+CMD ["bash", "tests/wine/inside.sh"]
