@@ -1,0 +1,9 @@
+FROM docker.io/library/rust:1-trixie
+RUN apt-get update && apt-get install -y --no-install-recommends libgtk-3-dev libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev webkit2gtk-driver xvfb xauth dbus-x11 dunst xdotool python3 ca-certificates && rm -rf /var/lib/apt/lists/*
+RUN rustup component add rustfmt clippy && cargo install tauri-driver --locked
+RUN mkdir -p /workspace
+WORKDIR /workspace
+ENV CARGO_BUILD_JOBS=2
+ENV WEBKIT_DISABLE_DMABUF_RENDERER=1
+ENV WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1
+CMD ["bash", "tests/ui/inside.sh"]

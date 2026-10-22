@@ -1,0 +1,27 @@
+# Desktop WebDriver verification
+
+Run from the repository root:
+
+```sh
+./tests/ui/run.sh
+```
+
+Podman (or `CONTAINER_ENGINE=docker`) builds an isolated image containing GTK,
+WebKitGTK, WebKitWebDriver, tauri-driver, Xvfb and Dunst. No host packages are
+installed. The runner checks formatting, Clippy and all workspace Rust tests,
+then drives the real desktop app against a separate CLI process.
+
+Seven scenarios cover background reception and mDNS discovery, explicit pairing,
+app-to-CLI transfer with 100% progress and SHA-256 verification, CLI-to-app
+acceptance and verified storage, rejection cleanup, untrusted text rendering,
+and strict TOML errors that preserve the saved configuration.
+
+WebDriver cannot operate GTK's native file chooser. The scenario supplies the
+chooser result through the existing `desktop_request` / `select_files` command
+using WebDriver execute-script. Production picker behavior is unchanged; no
+test environment switch or alternate transfer implementation is added. Native
+file selection remains a physical acceptance item.
+
+Dunst provides a notification service in the container. GNOME/KDE notification
+presentation, Windows WebView2 and macOS UI integration require the checks in
+[the acceptance checklist](../../docs/acceptance.md).
