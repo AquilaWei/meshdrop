@@ -164,6 +164,7 @@ async fn run(
                     "tailscale" => providers.push(Box::new(Tailscale {
                         identity: identity.clone(),
                         port: config.port,
+                        command: "tailscale".into(),
                     })),
                     "peer-list" => providers.push(Box::new(PeerList {
                         identity: identity.clone(),

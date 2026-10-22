@@ -61,3 +61,54 @@ async fn failed_provider_preserves_other_devices() {
     assert_eq!(devices.problems.len(), 1);
     assert!(devices.problems[0].error.contains("provider unavailable"));
 }
+
+const TAILSCALE_STATUS: &[u8] = br#"{
+ "Peer": {
+  "first": {"HostName":"v4-peer","OS":"linux","Online":true,"TailscaleIPs":["100.64.1.2"]},
+  "second": {"HostName":"v6-peer","OS":"windows","Online":true,"TailscaleIPs":["fd7a:115c:a1e0::2"]},
+  "third": {"HostName":"offline-peer","OS":"macOS","Online":false,"TailscaleIPs":["100.64.1.3"]}
+ }
+}"#;
+#[test]
+fn tailscale_status_preserves_ipv4_address() {
+    let devices = meshdrop_core::discovery::parse_tailscale_status(TAILSCALE_STATUS, 9843).unwrap();
+    assert_eq!(devices[0].address, "100.64.1.2:9843");
+}
+#[test]
+fn tailscale_status_brackets_ipv6_address() {
+    let devices = meshdrop_core::discovery::parse_tailscale_status(TAILSCALE_STATUS, 9843).unwrap();
+    assert_eq!(devices[1].address, "[fd7a:115c:a1e0::2]:9843");
+}
+#[test]
+fn tailscale_status_keeps_offline_peers_offline() {
+    let devices = meshdrop_core::discovery::parse_tailscale_status(TAILSCALE_STATUS, 9843).unwrap();
+    assert!(!devices[2].online);
+}
+#[test]
+fn tailscale_status_without_peers_is_empty() {
+    assert!(
+        meshdrop_core::discovery::parse_tailscale_status(br#"{"BackendState":"Running"}"#, 9843)
+            .unwrap()
+            .is_empty()
+    );
+}
+#[tokio::test]
+async fn missing_tailscale_reports_injected_executable_path() {
+    let directory = tempfile::tempdir().unwrap();
+    let command = directory.path().join("tailscale-does-not-exist");
+    let provider = meshdrop_core::discovery::Tailscale {
+        identity: std::sync::Arc::new(
+            meshdrop_core::identity::Identity::load(directory.path()).unwrap(),
+        ),
+        port: 9843,
+        command: command.clone(),
+    };
+    assert!(
+        provider
+            .discover()
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains(&command.display().to_string())
+    );
+}

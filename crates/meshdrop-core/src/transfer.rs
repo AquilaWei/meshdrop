@@ -1077,4 +1077,34 @@ mod tests {
         drop(tx);
         h.finish().await;
     }
+    #[tokio::test]
+    async fn peer_list_retains_online_results_when_another_peer_is_offline() {
+        use crate::discovery::{DiscoveryProvider, PeerList};
+        let h = Harness::new(10).await;
+        let client_id = Identity::load(&h._directory.path().join("client")).unwrap();
+        let server_id = Identity::load(&h._directory.path().join("server")).unwrap();
+        let address = h.client.address.trim_start_matches("https://").to_owned();
+        let path = h._directory.path().join("server/trust.json");
+        TrustStore::load(&path)
+            .unwrap()
+            .remember(&path, &address, &client_id.fingerprint())
+            .unwrap();
+        let provider = PeerList {
+            identity: Arc::new(client_id),
+            known: std::collections::BTreeMap::from([
+                ("127.0.0.1:1".into(), "00".repeat(32)),
+                (address.clone(), server_id.fingerprint()),
+            ]),
+        };
+        let report = provider.discover().await.unwrap();
+        assert!(
+            report
+                .devices
+                .iter()
+                .any(|device| device.online && device.address == address)
+        );
+        assert_eq!(report.problems.len(), 1);
+        assert!(report.problems[0].error.contains("127.0.0.1:1"));
+        h.finish().await;
+    }
 }

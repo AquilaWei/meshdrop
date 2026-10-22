@@ -139,6 +139,8 @@ impl DiscoveryProvider for Manual {
 pub struct Tailscale {
     pub identity: Arc<Identity>,
     pub port: u16,
+    /// Optional executable path permits deterministic integration and missing-tool diagnostics.
+    pub command: std::path::PathBuf,
 }
 #[async_trait]
 impl DiscoveryProvider for Tailscale {
@@ -146,37 +148,52 @@ impl DiscoveryProvider for Tailscale {
         "tailscale"
     }
     async fn discover(&self) -> Result<DiscoveryReport> {
-        let output = tokio::process::Command::new("tailscale")
+        let output = tokio::process::Command::new(&self.command)
             .args(["status", "--json"])
             .output()
             .await
-            .context("cannot run tailscale: install it or disable the tailscale provider")?;
+            .with_context(|| format!("cannot run tailscale executable {}: install it or disable the tailscale provider", self.command.display()))?;
         if !output.status.success() {
             bail!(
                 "tailscale status failed: {}",
                 String::from_utf8_lossy(&output.stderr)
             );
         }
-        let json: serde_json::Value = serde_json::from_slice(&output.stdout)?;
+        let candidates = parse_tailscale_status(&output.stdout, self.port)?;
         let mut devices = Vec::new();
-        if let Some(peers) = json["Peer"].as_object() {
-            for peer in peers.values() {
-                if let Some(ip) = peer["TailscaleIPs"]
-                    .as_array()
-                    .and_then(|ips| ips.first())
-                    .and_then(|ip| ip.as_str())
-                {
-                    let address = if ip.contains(':') {
-                        format!("[{ip}]:{}", self.port)
-                    } else {
-                        format!("{ip}:{}", self.port)
-                    };
-                    devices.push(probe(address, &self.identity).await);
-                }
+        for candidate in candidates {
+            if candidate.online {
+                devices.push(probe(candidate.address, &self.identity).await);
+            } else {
+                devices.push(candidate);
             }
         }
         Ok(devices.into())
     }
+}
+/// Parses Tailscale status without executing commands or contacting any device.
+/// Invalid JSON or IP addresses are errors rather than silently fabricated peers.
+pub fn parse_tailscale_status(bytes: &[u8], port: u16) -> Result<Vec<Device>> {
+    let json: serde_json::Value = serde_json::from_slice(bytes)?;
+    let mut devices = Vec::new();
+    if let Some(peers) = json["Peer"].as_object() {
+        for peer in peers.values() {
+            if let Some(ips) = peer["TailscaleIPs"].as_array() {
+                for ip in ips {
+                    let ip: std::net::IpAddr =
+                        ip.as_str().context("invalid Tailscale IP")?.parse()?;
+                    let address = std::net::SocketAddr::new(ip, port).to_string();
+                    devices.push(Device {
+                        name: peer["HostName"].as_str().unwrap_or(&address).into(),
+                        platform: peer["OS"].as_str().unwrap_or("unknown").into(),
+                        address,
+                        online: peer["Online"].as_bool().unwrap_or(false),
+                    });
+                }
+            }
+        }
+    }
+    Ok(devices)
 }
 /// Peer lists extend discovery through already authenticated peers only.
 pub struct PeerList {
