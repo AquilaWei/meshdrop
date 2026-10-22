@@ -1,0 +1,31 @@
+[package]
+name = "meshdrop-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+[lints]
+workspace = true
+[dependencies]
+anyhow = "1"
+async-trait = "0.1"
+bytes = "1"
+directories = "6"
+futures-util = "0.3"
+hex = "0.4"
+ipnet = { version = "2", features = ["serde"] }
+mdns-sd = "0.13"
+rcgen = "0.14"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "stream"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+tempfile = "3"
+tokio = { version = "1", features = ["full"] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
+tokio-util = { version = "0.7", features = ["io", "rt"] }
+toml = "0.9"
+uuid = { version = "1", features = ["v4", "serde"] }
+axum = "0.8"
+hyper = { version = "1", features = ["server", "http1"] }
+hyper-util = { version = "0.1", features = ["tokio", "service"] }
