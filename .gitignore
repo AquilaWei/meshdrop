@@ -2,3 +2,5 @@
 /notes/
 CLAUDE.md
 .claude/
+
+/crates/meshdrop-app/gen/schemas/
