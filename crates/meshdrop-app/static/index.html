@@ -1,5 +1,14 @@
 <!doctype html>
 <html lang="en">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>meshdrop</title><script src="app.js" defer></script></head>
-<body><h1>meshdrop</h1><p id="identity">Starting background receiver…</p><p id="error" role="alert"></p></body>
-</html>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>meshdrop</title><link rel="stylesheet" href="style.css"><script src="app.js" defer></script></head>
+<body>
+<header><div><span class="eyebrow">PRIVATE NETWORK · ENCRYPTED TRANSFERS</span><h1>meshdrop</h1></div><span id="service-state">Starting receiver…</span></header>
+<main>
+<section class="identity"><div><h2>My device</h2><h3 id="my-name"></h3><label>Certificate fingerprint</label><p id="fingerprint" class="mono"></p><details><summary>QR content</summary><p id="qr-content" class="mono"></p></details></div><canvas id="qr" aria-label="Pairing QR code"></canvas></section>
+<div id="error" role="alert" hidden></div>
+<section id="fingerprint-error" role="alert" hidden><h2>Fingerprint mismatch</h2><p>The stored identity and the peer certificate differ. Connection refused. Verify the device locally before changing trust.</p></section>
+<section><div class="section-heading"><h2>Devices</h2><button id="refresh">Refresh</button></div><form id="manual"><label for="address">Add host:port or QR content</label><div class="input-row"><input id="address" required placeholder="192.168.1.20:9843"><button>Add device</button></div></form><ul id="problems" aria-label="Discovery diagnostics"></ul><div id="devices"></div></section>
+<section id="outgoing-pair" role="dialog" aria-label="Confirm pairing" hidden><h2>Compare the code on both devices</h2><p id="pair-name"></p><strong id="pair-code" class="code"></strong><p>Only confirm when the six digits match.</p><button id="pair-confirm">Codes match — pair</button><button id="pair-dismiss" class="secondary">Cancel</button><p id="pair-status" role="status"></p></section>
+<section><h2>Incoming requests</h2><div id="invitations"></div></section>
+</main><footer>Receive service runs while this window is open. Closing the window stops it safely.</footer>
+</body></html>
