@@ -166,5 +166,10 @@ Android 15+ may limit dataSync background runtime; after the system stops it,
 reopen the app to start receiving again. Doze and OEM policies need real-device
 acceptance. These native runtime flows are implemented but emulator verification
 may be blocked by a host emulator crash; see `tests/android/README.md`.
+**Scan pairing QR** requests camera permission and accepts meshdrop QR content.
+A rejected camera permission leaves manual host:port / pasted QR input available.
+Scanning only adds a candidate; pairing still requires matching codes and explicit
+confirmation on both devices. Camera optics have not been tested in this host's
+crashing emulator.
 Tailscale enumeration and desktop folder opening are unavailable on Android;
 use a manual private VPN address instead. The receive path is shown in Settings.

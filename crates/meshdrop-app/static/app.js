@@ -197,3 +197,14 @@ $('#stop-receiver').addEventListener('click', async () => {
   try { await act('android_stop'); $('#service-state').textContent = 'Reception stopped'; $('#android-permission').textContent = 'Reception stopped. Reopen the app to start again.'; }
   catch (_) { /* displayed */ }
 });
+
+$('#scan-qr').addEventListener('click', async () => {
+  try {
+    const permission = await window.__TAURI__.core.invoke('plugin:barcode-scanner|request_permissions');
+    if (permission.camera !== 'granted') throw new Error('Camera permission denied. Enter a host:port or paste QR content manually.');
+    const result = await window.__TAURI__.core.invoke('plugin:barcode-scanner|scan',{formats:['QR_CODE'],windowed:false});
+    if (!result.content || !result.content.startsWith('meshdrop://')) throw new Error('This is not a meshdrop pairing QR. Enter an address manually.');
+    await act('add_device',{address:result.content}); await refresh();
+    await preparePair(result.content);
+  } catch (error) { failure(error); }
+});

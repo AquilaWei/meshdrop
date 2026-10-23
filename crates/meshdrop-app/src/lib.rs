@@ -54,7 +54,9 @@ async fn desktop_request(
 pub fn run() {
     let builder = tauri::Builder::default();
     #[cfg(target_os = "android")]
-    let builder = builder.plugin(android::init());
+    let builder = builder
+        .plugin(android::init())
+        .plugin(tauri_plugin_barcode_scanner::init());
     builder
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())

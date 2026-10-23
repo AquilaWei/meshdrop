@@ -758,6 +758,34 @@ mod tests {
             .unwrap();
         (directory, controller, rx)
     }
+    #[tokio::test]
+    async fn scanned_qr_does_not_establish_trust() {
+        let (directory, controller, _notices) = profile("Scanner", "[]").await;
+        controller.call("add_device", json!({"address":"meshdrop://127.0.0.1:9843#v=1&fp=0000000000000000000000000000000000000000000000000000000000000000"})).await.unwrap();
+        assert!(!directory.path().join("trust.json").exists());
+        controller.shutdown().await;
+    }
+    #[tokio::test]
+    async fn scanned_qr_with_unsupported_version_is_rejected() {
+        let (_directory, controller, _notices) = profile("Scanner", "[]").await;
+        let error = controller.call("add_device", json!({"address":"meshdrop://127.0.0.1:9843#v=99&fp=0000000000000000000000000000000000000000000000000000000000000000"})).await.unwrap_err();
+        assert!(error.contains("unsupported version"));
+        controller.shutdown().await;
+    }
+    #[tokio::test]
+    async fn manual_address_remains_available_after_bad_qr() {
+        let (_directory, controller, _notices) = profile("Scanner", "[]").await;
+        controller
+            .call("add_device", json!({"address":"meshdrop://invalid"}))
+            .await
+            .unwrap_err();
+        let result = controller
+            .call("add_device", json!({"address":"127.0.0.1:9843"}))
+            .await
+            .unwrap();
+        assert_eq!(result, Value::Null);
+        controller.shutdown().await;
+    }
     async fn address(controller: &Controller) -> String {
         let snapshot = controller.call("snapshot", Value::Null).await.unwrap();
         format!("127.0.0.1:{}", snapshot["port"])
