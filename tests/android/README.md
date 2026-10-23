@@ -36,41 +36,47 @@ if ADB is unavailable) on failure, exits nonzero and terminates its child proces
 Notification appearance, real Wi-Fi mDNS, camera optics, Doze and manufacturer
 background restrictions require physical-device acceptance.
 
-## Host execution evidence and limits
+## Renderer diagnosis and container fallback
 
-Android runtime verification is blocked on this Fedora host before the app can be
-installed. KVM's `emulator -accel-check` reports usable KVM (exit 0), but Google
-Emulator 37.1.11 and an isolated 36.3.10 both terminate with SIGSEGV during guest
-startup. This is a native emulator failure, not a passing app test. The underlying
-library/driver cause is unresolved: `coredumpctl info 2871558` (exit 0) confirms
-signal 11 and only an unresolved instruction address in the stack. It does not
-establish a specific renderer defect.
+Both runners default to `swangle` with Emulator 37.1.11. On this Fedora host,
+legacy `swiftshader_indirect` (also selected internally by some guest/off modes)
+crashed before boot. GDB/coredump evidence shows `SEGV_ACCERR` at generated code,
+with callers in `gles_swiftshader/libGLESv2.so`: a SwiftShader GLES JIT execution
+permission fault. Swangle avoids that path and boots successfully. The exact
+upstream allocator/permission defect is not established; KVM is usable, and
+neither disabling audio/Vulkan nor offscreen Qt fixed the legacy renderer.
 
-The final bounded API34 attempts used Emulator 36.3.10 with `swiftshader_indirect`
-and `off`; each runner exited 1, reporting emulator return code -11 before boot.
-The earlier API35 `-gpu off` attempt likewise exited 1 / emulator -11. Logs:
+Verified: the host runner and the pinned-container runner each passed all 8
+scenarios with Emulator 37.1.11 and swangle; the legacy renderer's GDB/coredump
+showed SEGV_ACCERR in SwiftShader libGLESv2 generated code.
+The successful run also exposed and verified a fix for an already-granted
+notification permission leaving the native permission request unresolved.
+No additional webview notification capability is granted.
 
-- `/tmp/meshdrop-stage3-coredump.log`
-- `/tmp/meshdrop-stage3-emulator-off.log`
-- `/tmp/meshdrop-stage3-api34-swiftshader.log`
-- `/tmp/meshdrop-stage3-api34-off.log`
-
-No Android E2E scenario, camera permission/scan, notification appearance, native
-SAF chooser or share intent has been demonstrated running successfully here.
-Debug APK compilation and JVM safety/lifecycle tests are separate successful
-checks. The script is retained for execution from a normal user terminal on a
-working emulator environment; no more emulator retries were made after those
-two API34 modes. The user's `ge_test` AVD was not modified.
-
-To override tools or the test image without replacing the user's SDK:
+For a stock Debian container fallback, first build the debug APK using the host
+runner prerequisites, then run:
 
 ```sh
-MESHDROP_EMULATOR="$HOME/.local/share/meshdrop-android/emulator-36/emulator/emulator" \
-MESHDROP_EMULATOR_GPU=off \
-MESHDROP_ANDROID_IMAGE='system-images;android-34;google_apis;x86_64' \
-./tests/android/run.sh
+./tests/android/container.sh
 ```
 
-The emulator archive is available at
-https://developer.android.com/studio/emulator_archive. No host packages are
-installed and the app's minSdk 24 / targetSdk 36 are unchanged.
+The fallback uses Podman, host networking and `/dev/kvm`; mounts only the SDK
+read-only, copies filtered project sources and the debug APK, and creates a fresh
+AVD inside the container. It does not copy the user's home, credentials or AVDs.
+No host system packages are installed. The user's `ge_test` AVD and app minSdk 24 /
+targetSdk 36 remain unchanged. The host and container runners serialize access to
+their fixed ports using a lock.
+
+The image verifies Google's official Emulator 37.1.11 archive:
+`https://dl.google.com/android/repository/emulator-linux_x64-15917651.zip`, SHA-256
+`95771e0ae431897b2a4bd2d97fa095f29a8b0624a7b216baf529f9306161c266`.
+The checksum is published in the [official emulator archive manifest](https://developer.android.com/studio/emulator_archive).
+Set `MESHDROP_EMULATOR_ARCHIVE=/path/to/emulator.zip` to reuse a downloaded copy;
+the same checksum is required. `CONTAINER_ENGINE` may select a compatible engine.
+`MESHDROP_EMULATOR_GPU` overrides swangle for diagnosis only.
+
+Optional container tracing: `MESHDROP_EMULATOR_TRACE=1 ./tests/android/container.sh`
+runs strace for mmap/mprotect/munmap and prints relevant executable mappings and
+faults on exit. On both runners this flag also enables emulator `-verbose` and
+`-debug-init`; these diagnosis flags are disabled by default. Failure output includes logcat,
+Android exit information and the emulator log when ADB is unavailable.

@@ -1,0 +1,13 @@
+FROM docker.io/library/rust:1-trixie
+RUN apt-get update && apt-get install -y --no-install-recommends default-jre-headless python3 strace ca-certificates unzip libx11-6 libxcb1 libxext6 libxi6 libgl1 libpulse0 libnss3 libxcomposite1 libxcursor1 libxdamage1 libxfixes3 libxrandr2 libxrender1 libxtst6 libasound2t64 && rm -rf /var/lib/apt/lists/*
+# The build context contains only this file and the official, verified archive.
+COPY emulator.zip /tmp/emulator.zip
+RUN echo '95771e0ae431897b2a4bd2d97fa095f29a8b0624a7b216baf529f9306161c266  /tmp/emulator.zip' | sha256sum -c - && unzip -q /tmp/emulator.zip -d /opt && rm /tmp/emulator.zip
+RUN mkdir -p /workspace
+WORKDIR /workspace
+ENV ANDROID_HOME=/opt/android-sdk
+ENV MESHDROP_EMULATOR=/opt/emulator/emulator
+ENV QT_QPA_PLATFORM=offscreen
+ENV MESHDROP_ANDROID_APK=/workspace/app.apk
+ENV CARGO_BUILD_JOBS=2
+CMD ["bash", "tests/android/container-inside.sh"]

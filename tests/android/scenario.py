@@ -95,7 +95,7 @@ with tempfile.TemporaryDirectory(prefix='meshdrop-android-') as temporary:
         avdmanager = SDK/'cmdline-tools/latest/bin/avdmanager'
         subprocess.run([str(avdmanager), 'create', 'avd', '-n', 'meshdrop-test', '-k', os.environ.get('MESHDROP_ANDROID_IMAGE','system-images;android-34;google_apis;x86_64'), '--force', '--path', str(root/'avd/meshdrop-test.avd')], input=b'no\n', env=env, check=True, stdout=subprocess.PIPE, timeout=180)
         emulator_log = (root/'emulator.log').open('wb')
-        emulator = subprocess.Popen([os.environ.get('MESHDROP_EMULATOR', str(SDK/'emulator/emulator')), '-avd', 'meshdrop-test', '-port', '5580', '-no-window', '-no-audio', '-no-boot-anim', '-no-snapshot', '-gpu', os.environ.get('MESHDROP_EMULATOR_GPU', 'swiftshader_indirect'), '-feature', '-Vulkan', '-show-kernel', '-memory', '1024', '-cores', '2', '-accel', 'on'], env=env, stdout=emulator_log, stderr=subprocess.STDOUT)
+        emulator = subprocess.Popen([os.environ.get('MESHDROP_EMULATOR', str(SDK/'emulator/emulator')), '-avd', 'meshdrop-test', '-port', '5580', '-no-window', '-no-audio', '-no-boot-anim', '-no-snapshot', '-gpu', os.environ.get('MESHDROP_EMULATOR_GPU', 'swangle'), '-feature', '-Vulkan', '-show-kernel', *(['-verbose', '-debug-init'] if os.environ.get('MESHDROP_EMULATOR_TRACE') == '1' else []), '-memory', '2048', '-cores', '2', '-accel', 'on'], env=env, stdout=emulator_log, stderr=subprocess.STDOUT)
         processes.append(emulator)
         def booted():
             if emulator.poll() is not None:
@@ -103,10 +103,11 @@ with tempfile.TemporaryDirectory(prefix='meshdrop-android-') as temporary:
             return adb('shell','getprop','sys.boot_completed').strip() == b'1'
         wait(booted, 600)
         adb('shell','input','keyevent','82')
-        apk = Path('crates/meshdrop-app/gen/android/app/build/outputs/apk/universal/debug/app-universal-debug.apk')
+        apk = Path(os.environ.get('MESHDROP_ANDROID_APK', 'crates/meshdrop-app/gen/android/app/build/outputs/apk/universal/debug/app-universal-debug.apk'))
         adb('install','-r',str(apk))
         adb('shell','pm','grant',PACKAGE,'android.permission.POST_NOTIFICATIONS')
         adb('forward','tcp:19843','tcp:9843')
+        adb('logcat','-c')
         adb('shell','am','start','-n',PACKAGE+'/.MainActivity')
         sockets = wait(lambda: [line.split('@')[-1] for line in adb('shell','cat','/proc/net/unix').decode().splitlines() if 'webview_devtools_remote_' in line])
         adb('forward','tcp:19222','localabstract:'+sockets[0])
@@ -179,7 +180,9 @@ with tempfile.TemporaryDirectory(prefix='meshdrop-android-') as temporary:
         print('8 Android scenarios passed; 0 failed', flush=True)
     except Exception:
         try:
-            print(adb('logcat','-d','-t','180').decode(errors='replace'), flush=True)
+            print(adb('logcat','-b','crash','-d').decode(errors='replace'), flush=True)
+            print(adb('shell','dumpsys','activity','exit-info',PACKAGE).decode(errors='replace'), flush=True)
+            print(adb('logcat','-d','-t','300').decode(errors='replace'), flush=True)
         except Exception as diagnostic:
             print('logcat unavailable:', diagnostic, flush=True)
             print((root/'emulator.log').read_text(errors='replace')[-12000:], flush=True)
