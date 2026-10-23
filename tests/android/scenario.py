@@ -128,7 +128,10 @@ with tempfile.TemporaryDirectory(prefix='meshdrop-android-') as temporary:
         wait(lambda: 'listening' in (root/'cli.log').read_text())
         pairing = subprocess.Popen(['target/debug/meshdrop','--state-dir',str(cli),'pair','127.0.0.1:19843','--advertise','10.0.2.2:19844'], stdin=subprocess.PIPE, stdout=cli_log, stderr=cli_log, text=True)
         processes.append(pairing); pairing.stdin.write('y\n'); pairing.stdin.flush()
-        wait(lambda: cdp.call('snapshot')['invitations'])
+        invitation = wait(lambda: cdp.call('snapshot')['invitations'])[0]
+        code = invitation['detail']['code']
+        assert len(code) == 6
+        wait(lambda: f'Compare code {code} on BOTH devices' in (root/'cli.log').read_text())
         cdp.click('#invitations [data-action=accept]')
         assert pairing.wait(timeout=30) == 0
         print('PASS: Linux and Android explicitly pair through NAT', flush=True)
