@@ -3,7 +3,7 @@
 Run `./tests/android/run.sh` from the repository root. The script builds the CLI
 and Android x86_64 debug APK, starts a fresh headless KVM emulator, installs the
 APK and drives its debug WebView over Chrome DevTools Protocol (Python standard
-library only). It uses real TLS transfer and native Android commands.
+library only, Python 3.11+). It uses real TLS transfer and native Android commands.
 
 Required user-owned tools:
 

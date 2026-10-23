@@ -13,6 +13,16 @@ val tauriProperties = Properties().apply {
     }
 }
 
+// CLI-generated properties can omit the version. Keep Cargo as the only source.
+val workspaceVersion = rootProject.file("../../../../Cargo.toml").readLines()
+    .single { it.trimStart().startsWith("version = ") }
+    .substringAfter('"').substringBefore('"')
+val versionParts = workspaceVersion.split('.').map { it.toInt() }
+require(versionParts.size == 3 && versionParts.all { it in 0..999 }) {
+    "Android requires a three-part workspace version with components below 1000"
+}
+val workspaceVersionCode = versionParts.fold(0) { code, part -> code * 1000 + part }
+
 android {
     compileSdk = 36
     namespace = "org.meshdrop.desktop"
@@ -21,8 +31,8 @@ android {
         applicationId = "org.meshdrop.desktop"
         minSdk = 24
         targetSdk = 36
-        versionCode = tauriProperties.getProperty("tauri.android.versionCode", "1").toInt()
-        versionName = tauriProperties.getProperty("tauri.android.versionName", "1.0")
+        versionCode = workspaceVersionCode
+        versionName = workspaceVersion
     }
     buildTypes {
         getByName("debug") {
