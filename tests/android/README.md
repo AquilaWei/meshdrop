@@ -46,7 +46,7 @@ permission fault. Swangle avoids that path and boots successfully. The exact
 upstream allocator/permission defect is not established; KVM is usable, and
 neither disabling audio/Vulkan nor offscreen Qt fixed the legacy renderer.
 
-Verified: the host runner and the pinned-container runner each passed all 8
+Verified: the host runner and the pinned-container runner each passed all 9
 scenarios with Emulator 37.1.11 and swangle; the legacy renderer's GDB/coredump
 showed SEGV_ACCERR in SwiftShader libGLESv2 generated code.
 The successful run also exposed and verified a fix for an already-granted
@@ -82,4 +82,8 @@ faults on exit. On both runners this flag also enables emulator `-verbose` and
 Android exit information and the emulator log when ADB is unavailable.
 
 The shared UI scenario opens More for received-file sharing and stopping reception,
-and asserts an unresolved address appears only in diagnostics.
+and asserts an unresolved address appears only in diagnostics. Both runners first
+run six activity/focus parser tests. Runtime checks wait for initial boot broadcasts
+to settle, then require the share chooser to be both resumed and focused before
+sending Back. They require MainActivity to regain focus with the same process ID
+and the original CDP connection; crashes are not hidden by relaunching the app.

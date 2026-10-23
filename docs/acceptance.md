@@ -37,7 +37,7 @@ pairing, bidirectional hashes, rejection and FileProvider chooser dispatch.
 | OEM background restrictions | Repeat Home, screen-off and notification tests on the user's phone brand, including its battery/auto-start controls. | Record settings required by that manufacturer; do not promise a foreground service bypasses Doze or forced process termination. |
 | Cross-platform interoperability | Pair independently with Fedora, Windows and macOS; transfer Unicode filenames, multiple files, collisions and a large file in both directions; cancel on each side. | Explicit pairing/accept/reject, progress, cancellation cleanup and hash verification work on native devices. |
 
-The host and pinned-container emulator runners each passed eight scenarios.
+The host and pinned-container emulator runners each passed nine scenarios.
 These checks retain only device, OS presentation and real-network behavior not
 established by those simulations; see `tests/android/README.md`.
 

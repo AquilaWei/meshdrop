@@ -15,15 +15,15 @@ cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warni
 | Suite | Actual result |
 |---|---|
 | fmt / clippy | Pass; clippy warnings denied |
-| Linux workspace | 76 passed, 0 failed: app state/permissions 21, CLI processes 5, transport 23, discovery 11, identity 4, storage/config/network 12 |
+| Linux workspace | 79 passed, 0 failed: app state/permissions 24, CLI processes 5, transport 25, discovery 9, identity 4, storage/config/network 12 |
 | Rootless Podman, three Ubuntu containers | 4 scenarios passed, 0 failed: mutual mDNS discovery, explicit pairing, bidirectional SHA-256 transfer, rejection without content |
-| Windows GNU target, containerized Wine | 53 passed, 0 failed: CLI processes 3, transport 23, discovery 11, identity 4, storage/config/network 12 |
+| Windows GNU target, containerized Wine | 53 passed, 0 failed: CLI processes 3, transport 25, discovery 9, identity 4, storage/config/network 12 |
 
-Desktop WebDriver: 7 scenarios passed, 0 failed, with real CLI peers under Xvfb.
+Desktop WebDriver: 9 scenarios passed, 0 failed, with real CLI peers under Xvfb.
 Windows desktop: compile-only `cargo check -p meshdrop-app --locked --target
 x86_64-pc-windows-gnu`; desktop state tests run on Linux, not in Wine.
 
-The UI runner also repeats workspace fmt, Clippy, 76 Rust tests and binary builds
+The UI runner also repeats workspace fmt, Clippy, 79 Rust tests and binary builds
 inside its container. Final execution logs are reported with the delivery rather
 than treated as persistent repository artifacts.
 
@@ -80,7 +80,7 @@ HEAD. Additional coverage tests for already-correct cases also pass.
 Verification commands above completed with exit code 0. Container execution used
 rootless Podman. The Wine core/CLI suites exclude the same two target-specific
 tests listed in `tests/wine/README.md`; none of the core review regressions are
-excluded. The app crate's 21 state/permission tests run on Linux, while Wine only compiles
+excluded. The app crate's 24 state/permission tests run on Linux, while Wine only compiles
 the Windows app target.
 
 ## Desktop implementation evidence
@@ -89,12 +89,13 @@ Before the respective changes, sender-name propagation failed its assertion,
 receive completion timed out waiting for a verified-completion event, and the
 old desktop controller rejected the newly introduced discovery, transfer and
 settings commands.
-The corresponding feature commits include their tests. Seventeen application state tests
+The corresponding feature commits include their tests. At initial desktop delivery, seventeen application state tests
 cover receiver lifecycle, invalid configuration, partial discovery, accepted and
 rejected pairing, fingerprint mismatch, accepted/rejected/cancelled transfers,
 and strict persistent notification settings.
 
-The seven WebDriver scenarios cover startup/discovery/QR, explicit in-app pairing,
+The nine WebDriver scenarios cover startup/discovery/QR, diagnostic-only failed candidates,
+pairing during Send with automatic invitation, paired sends without another code prompt,
 app-to-CLI progress and SHA-256, CLI-to-app acceptance and SHA-256, rejection
 cleanup, text-only rendering and invalid TOML preservation. WebDriver supplies
 chooser results through the existing command; GTK native chooser interaction is
@@ -111,9 +112,10 @@ fallback. The generated project retains minSdk 24 / targetSdk 36. Hosted CI has
 built the ARM64 debug APK; ARM64 runtime is not claimed tested.
 
 Android E2E: the host runner and pinned Debian-container runner each passed all
-8 scenarios with Emulator 37.1.11, swangle and the API34 x86_64 image, exit 0.
+9 scenarios with Emulator 37.1.11, swangle and the API34 x86_64 image, exit 0.
 Coverage: foreground service, explicit pairing through NAT, accepted reception
-and SHA-256, FileProvider chooser dispatch, sending and SHA-256, rejection without
+and SHA-256, FileProvider chooser dispatch, diagnostic-only unresolved candidates,
+sending and SHA-256, rejection without
 stored content, Home/background invitation with explicit decision, and Stop.
 Legacy SwiftShader GLES generated code faulted with SEGV_ACCERR; GDB callers were
 in libGLESv2.so. Swangle avoids that JIT path; the exact upstream cause remains
@@ -151,3 +153,10 @@ the root workspace version and derives versionCode without another version
 literal. Rebuilt APK metadata matches Cargo and retains minSdk 24 / targetSdk 36
 (exit 0). The runner executes the persistent
 `tests/android/check_apk.py` check before attempting emulator tests.
+
+Android chooser synchronization: the former substring check could match a queued
+chooser intent before it owned focus. The runtime scenario now waits for resumed
+activity and window focus to agree before Back, then checks MainActivity returns
+with the original PID and CDP connection. Six parser tests cover transitional
+focus and the API34 `topResumedActivity=` format. Fresh-image boot broadcasts are
+drained before launch so initial system-package changes do not interrupt sharing.

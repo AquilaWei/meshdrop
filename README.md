@@ -1,6 +1,6 @@
 # meshdrop
 
-**Private-network file invitations for Linux, Windows and macOS.** No cloud,
+**Private-network file invitations for Linux, Windows, macOS and Android.** No cloud,
 public CA or Tailscale account required. The Rust core is shared by the CLI and
 Tauri desktop and Android apps. GPL-3.0-or-later; see [LICENSE](LICENSE).
 
@@ -108,7 +108,7 @@ fmt, clippy and tests on Ubuntu, Windows and macOS, plus an Android debug APK
 build job. All four hosted jobs have passed on the public
 [AquilaWei/meshdrop repository](https://github.com/AquilaWei/meshdrop).
 
-The Xvfb/WebDriver suite drives seven desktop scenarios against real CLI peers.
+The Xvfb/WebDriver suite drives nine desktop scenarios against real CLI peers.
 Its chooser-result injection and native UI limits are documented in
 [tests/ui/README.md](tests/ui/README.md). Wine also checks the Windows app target;
 WebView2 UI execution requires native Windows.
@@ -188,7 +188,7 @@ multicast lock. The notification toggle controls invitation alerts; the foregrou
 service notification is required while receiving. Stop releases the lock, cancels transfers and closes the listener.
 Android 15+ may limit dataSync background runtime; after the system stops it,
 reopen the app to start receiving again. Doze and OEM policies need real-device
-acceptance. The host and pinned-container runners each pass all eight runtime
+acceptance. The host and pinned-container runners each pass all nine runtime
 scenarios with swangle; see `tests/android/README.md`.
 **Scan pairing QR** requests camera permission and accepts meshdrop QR content.
 A rejected camera permission leaves manual host:port / pasted QR input available.
