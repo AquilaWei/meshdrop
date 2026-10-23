@@ -11,6 +11,8 @@ import tempfile
 import time
 import urllib.request
 
+from activity import foreground_activity
+
 SDK = Path(os.environ['ANDROID_HOME'])
 ADB = str(SDK / 'platform-tools/adb')
 SERIAL = 'emulator-5580'
@@ -21,7 +23,8 @@ class EmulatorExited(RuntimeError):
     pass
 
 def adb(*args, **kw):
-    return subprocess.run([ADB, '-s', SERIAL, *args], check=True, capture_output=True, timeout=20, **kw).stdout
+    kw.setdefault('timeout', 20)
+    return subprocess.run([ADB, '-s', SERIAL, *args], check=True, capture_output=True, **kw).stdout
 
 def wait(fn, seconds=60):
     deadline = time.monotonic() + seconds
@@ -36,6 +39,12 @@ def wait(fn, seconds=60):
             last = error
         time.sleep(.2)
     raise AssertionError(f'timed out; last error: {last}')
+
+def current_activity():
+    return foreground_activity(
+        adb('shell', 'dumpsys', 'activity', 'activities').decode(),
+        adb('shell', 'dumpsys', 'window').decode(),
+    )
 
 class CDP:
     def __init__(self, url):
@@ -107,6 +116,9 @@ with tempfile.TemporaryDirectory(prefix='meshdrop-android-') as temporary:
         adb('install','-r',str(apk))
         adb('shell','pm','grant',PACKAGE,'android.permission.POST_NOTIFICATIONS')
         adb('forward','tcp:19843','tcp:9843')
+        # Fresh Google API images update system components through boot broadcasts.
+        # Wait for those queued changes before launching the app or its chooser.
+        adb('shell', 'am', 'wait-for-broadcast-idle', timeout=120)
         adb('logcat','-c')
         adb('shell','am','start','-n',PACKAGE+'/.MainActivity')
         sockets = wait(lambda: [line.split('@')[-1] for line in adb('shell','cat','/proc/net/unix').decode().splitlines() if 'webview_devtools_remote_' in line])
@@ -149,9 +161,17 @@ with tempfile.TemporaryDirectory(prefix='meshdrop-android-') as temporary:
         cdp.click('#show-more')
         cdp.click('#received-refresh')
         wait(lambda: source.name in cdp.text('#received-files'))
+        app_pid = adb('shell', 'pidof', PACKAGE).strip()
+        assert app_pid, 'App must be alive before sharing'
         cdp.click('#received-files button')
-        wait(lambda: 'ChooserActivity' in adb('shell','dumpsys','activity','activities').decode() or 'android.intent.action.CHOOSER' in adb('shell','dumpsys','activity','activities').decode())
+        # A queued chooser intent is visible before it owns focus. Back sent then
+        # can finish MainActivity instead, terminating Tauri and its CDP socket.
+        wait(lambda: (current_activity() or '').endswith('.ChooserActivity'))
         adb('shell','input','keyevent','4')
+        wait(lambda: current_activity() == PACKAGE + '.MainActivity')
+        assert adb('shell', 'pidof', PACKAGE).strip() == app_pid, 'App exited or restarted while dismissing Share'
+        wait(lambda: cdp.evaluate('document.visibilityState') == 'visible')
+
         print('PASS: received content can be shared without adb access', flush=True)
         cdp.call('add_device', {'address':'10.0.2.2:19844'}); cdp.call('refresh'); cdp.evaluate('poll()')
         wait(lambda: 'Paired' in cdp.text('#devices'))
