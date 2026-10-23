@@ -1,6 +1,8 @@
 //! Desktop commands delegate to a testable message-driven application service.
 #[cfg(target_os = "android")]
 mod android;
+#[cfg(any(test, target_os = "android"))]
+mod permissions;
 pub mod service;
 use service::Controller;
 use tauri::Manager;

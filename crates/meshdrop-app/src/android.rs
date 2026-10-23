@@ -42,10 +42,18 @@ pub async fn request(
             let result = match operation.as_str() {
                 "android_start" => {
                     use tauri_plugin_notification::NotificationExt;
-                    let permission = app
-                        .notification()
-                        .request_permission()
-                        .map_err(|e| e.to_string())?;
+                    let permission = crate::permissions::notification_permission(
+                        || {
+                            app.notification()
+                                .permission_state()
+                                .map_err(|e| e.to_string())
+                        },
+                        || {
+                            app.notification()
+                                .request_permission()
+                                .map_err(|e| e.to_string())
+                        },
+                    )?;
                     let channel: Channel<Value> = Channel::new(move |event| {
                         if let tauri::ipc::InvokeResponseBody::Json(body) = event {
                             eprintln!("Android receiver lifecycle: {body}");
