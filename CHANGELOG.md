@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.1.2 - 2026-10-22
+
+PATCH test build; physical-device acceptance has not been performed.
+
+- Add the Android app with private receive storage and no broad storage permission.
+- Show the matching test-build version in Android app information.
+- Keep reception active using an ongoing notification with Stop receiving and Wi-Fi multicast support.
+- Show notification permission denial; invitations always require explicit acceptance.
+- Scan meshdrop QR codes with the camera and retain manual input when permission is denied.
+- Select documents through Android's picker and Share completed received files through the native chooser.
+- Explain desktop-only features on Android and add a debug APK CI build.
+- Android emulator E2E is blocked by a native emulator SIGSEGV before app installation; camera, notification appearance, Doze/OEM behavior and native interop still require acceptance.
+
 ## 0.1.1 - 2026-10-22
 
 PATCH test build; physical-device acceptance has not been performed.
