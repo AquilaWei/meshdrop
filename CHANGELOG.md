@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.1.4 - 2026-10-23
+
+PATCH test build; physical-device acceptance is pending.
+
+- Simplify sending to three steps: search devices, choose files, and send with per-device results and cancellation.
+- Show only confirmed meshdrop devices; keep unresolved, offline and non-meshdrop candidates in discovery diagnostics.
+- Confirm matching pairing codes during Send, then continue the invitation automatically; remembered devices skip pairing.
+- Present incoming pairing requests and file invitations as dialogs.
+- Keep device information, QR, manual addresses, diagnostics, settings and Android received-file actions in More.
+
 ## 0.1.3 - 2026-10-22
 
 PATCH test build; physical-device acceptance has not been performed.
