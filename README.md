@@ -2,7 +2,7 @@
 
 **Private-network file invitations for Linux, Windows and macOS.** No cloud,
 public CA or Tailscale account required. The Rust core is shared by the CLI and
-Tauri desktop app; Android is planned next. GPL-3.0-or-later; see [LICENSE](LICENSE).
+Tauri desktop and Android apps. GPL-3.0-or-later; see [LICENSE](LICENSE).
 
 ## Try it
 
@@ -75,7 +75,12 @@ file, so successfully completed files remain if a later file fails.
 Android development uses a user-owned compatible JDK, SDK and NDK; set
 `JAVA_HOME`, `ANDROID_HOME` and `NDK_HOME` to those installations. For example,
 `JAVA_HOME=$HOME/.local/share/meshdrop-android/jdk-17` can be reused by scripts.
-From `crates/meshdrop-app`, run `cargo tauri android build --debug --target x86_64`.
+From `crates/meshdrop-app`, run `cargo tauri android build --debug --target aarch64`
+for a typical ARM64 phone, or use `--target x86_64` for the emulator. Install the
+Rust target for that ABI with `rustup target add aarch64-linux-android` or
+`rustup target add x86_64-linux-android`. The Android runner checks a debug APK and
+JVM unit tests; its tool requirements and known host SIGSEGV are recorded in
+[tests/android/README.md](tests/android/README.md).
 No host system packages or release signing keys are installed by this project.
 
 
@@ -87,6 +92,8 @@ cargo test --workspace
 ./tests/docker/run.sh
 ./tests/wine/run.sh
 ./tests/ui/run.sh
+# Android KVM runtime check (host emulator crash currently blocks this):
+./tests/android/run.sh
 ```
 
 Container scripts download images and build dependencies inside containers. Wine
@@ -104,7 +111,7 @@ Its chooser-result injection and native UI limits are documented in
 WebView2 UI execution requires native Windows.
 
 See [protocol](docs/protocol.md), [progress](progress.md), and
-[feature list](feature_list.json). Android is planned next; iOS, Bluetooth and
+[feature list](feature_list.json). Android runtime acceptance remains pending; iOS, Bluetooth and
 Taildrop compatibility are outside scope.
 
 ## Desktop app (Tauri 2)
@@ -161,7 +168,8 @@ On Android 13+, allow notification permission when requested. Denying it is show
 in the app; incoming invitations still require explicit acceptance. Background
 reception uses an ongoing notification with **Stop receiving**. Home keeps the
 receiver process alive through a dataSync foreground service and holds the Wi-Fi
-multicast lock. Stop releases the lock, cancels transfers and closes the listener.
+multicast lock. The notification toggle controls invitation alerts; the foreground
+service notification is required while receiving. Stop releases the lock, cancels transfers and closes the listener.
 Android 15+ may limit dataSync background runtime; after the system stops it,
 reopen the app to start receiving again. Doze and OEM policies need real-device
 acceptance. These native runtime flows are implemented but emulator verification
@@ -172,4 +180,5 @@ Scanning only adds a candidate; pairing still requires matching codes and explic
 confirmation on both devices. Camera optics have not been tested in this host's
 crashing emulator.
 Tailscale enumeration and desktop folder opening are unavailable on Android;
-use a manual private VPN address instead. The receive path is shown in Settings.
+use a manual private VPN address instead. The default private receive directory is `files/meshdrop/received` inside the app
+data directory. Keep this destination to use the built-in sharing list.

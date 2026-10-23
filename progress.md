@@ -1,6 +1,7 @@
 # meshdrop progress
 
-Stages 1 and 2 implementation and automated verification are complete. The new orphan
+Stages 1 and 2 are accepted. Stage 3 implementation and debug compilation are
+complete; Android runtime acceptance is blocked by a native emulator crash. The new orphan
 history is on `hb/19-linux-windows-ios-macos-airdro`; no legacy crates or prior
 commits were carried into it. No push, tag, release, master update or main-worktree
 edit was performed.
@@ -12,7 +13,7 @@ pinned HTTPS; channel-based pairing/file decisions; bounded streaming/progress;
 multiple files; both-side cancellation and disconnect cleanup; mDNS, Tailscale,
 peer-list and manual/QR discovery; Linux/Windows/macOS verification CI.
 
-Automated results: Linux workspace 67 tests; three-container discovery/pairing/
+Automated results: Linux workspace 72 tests; three-container discovery/pairing/
 transfer/rejection 4 scenarios; Windows target in Wine 53 tests. The Linux-only
 VmHWM and Unix-only SIGTERM tests are excluded from the Windows target, with
 reasons in `tests/wine/README.md`. Exact commands and results are recorded in
@@ -52,10 +53,27 @@ settings atomically. Twelve controller tests and seven real WebDriver scenarios
 exercise the app with CLI peers. Windows app compilation is checked separately
 from the 53 Wine core/CLI tests; WebView2 runtime remains native-only.
 
-Next: Android app/foreground service. No Android, iOS, Bluetooth or Taildrop
-implementation is included here. Physical steps and expected results are in
-`docs/acceptance.md`: GNOME/KDE notifications, Windows WebView2/firewall/picker,
-macOS unsigned first launch and notifications, real LAN/VPN and storage behavior.
-The native chooser is represented by injected chooser results in WebDriver.
-Hosted CI has not run. Network/folder settings require restart; notification
-preferences apply immediately. No push, tag or master change was performed.
+Stage 3 adds the generated Android project (minSdk 24, targetSdk 36 unchanged),
+app-private receive storage, a dataSync foreground service with Stop action and
+MulticastLock, explicit notification permission handling, native FileProvider
+sharing of completed files and SAF import for sending. The official barcode
+scanner handles camera QR; manual addresses remain available. Android reports
+its platform and disables desktop-only Tailscale enumeration/folder opening.
+
+Verified: Android x86_64 debug APK builds, 8 Kotlin JVM safety/lifecycle tests,
+and 72 workspace Rust tests. Docker has 4 scenarios; Wine has 53 tests plus the
+Windows desktop check; desktop WebDriver has 7 scenarios plus 72 Rust tests.
+The Android runner contains 8 real interoperability scenarios but none passed:
+Emulator 37 and isolated 36 crash before app installation. The final API34 budget
+used swiftshader_indirect and off; both runner exit 1 / emulator -11. Native core
+PID 2871558 confirms SIGSEGV with an unresolved stack; the underlying host/driver
+cause is not established. No further emulator retries were made. Evidence and
+user-terminal instructions are in `tests/android/README.md`.
+
+Remaining: execute Android runtime tests on a functioning emulator; physical
+Wi-Fi mDNS, Doze/battery/OEM restrictions, notification and camera permissions,
+native sharing/document picking, and Fedora/Windows/macOS interoperability.
+Native desktop checks remain pending too. Hosted CI is configured, not run.
+Private files are removed on uninstall; selected documents are copied into app
+cache. Android dataSync lifetime is limited by OS policy; reopen after a stop.
+No push, tag, master or main-worktree modification was performed.

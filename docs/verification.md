@@ -1,4 +1,4 @@
-# Automated verification through desktop stage two
+# Automated verification through Android stage three
 
 Commands run locally, without a push or hosted CI:
 
@@ -12,7 +12,7 @@ cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warni
 | Suite | Actual result |
 |---|---|
 | fmt / clippy | Pass; clippy warnings denied |
-| Linux workspace | 67 passed, 0 failed: desktop state 12, CLI processes 5, transport 23, discovery 11, identity 4, storage/config/network 12 |
+| Linux workspace | 72 passed, 0 failed: app state 17, CLI processes 5, transport 23, discovery 11, identity 4, storage/config/network 12 |
 | Rootless Podman, three Ubuntu containers | 4 scenarios passed, 0 failed: mutual mDNS discovery, explicit pairing, bidirectional SHA-256 transfer, rejection without content |
 | Windows GNU target, containerized Wine | 53 passed, 0 failed: CLI processes 3, transport 23, discovery 11, identity 4, storage/config/network 12 |
 
@@ -20,10 +20,10 @@ Desktop WebDriver: 7 scenarios passed, 0 failed, with real CLI peers under Xvfb.
 Windows desktop: compile-only `cargo check -p meshdrop-app --locked --target
 x86_64-pc-windows-gnu`; desktop state tests run on Linux, not in Wine.
 
-Logs for this delivery are `/tmp/meshdrop-stage2-verify.log`,
-`/tmp/meshdrop-stage2-docker.log`, `/tmp/meshdrop-stage2-wine.log` and
-`/tmp/meshdrop-stage2-ui.log`. The UI runner also repeats workspace fmt, Clippy,
-67 Rust tests and binary builds inside its container.
+Logs for this delivery are `/tmp/meshdrop-stage3-verify.log`,
+`/tmp/meshdrop-stage3-docker.log`, `/tmp/meshdrop-stage3-wine.log` and
+`/tmp/meshdrop-stage3-ui.log`. The UI runner also repeats workspace fmt, Clippy,
+72 Rust tests and binary builds inside its container.
 
 The Linux process test transfers a sparse 128-MiB source through the real CLI and
 checks the receiving child process's own VmHWM is below 96 MiB. This measures the
@@ -73,8 +73,10 @@ HEAD. Additional coverage tests for already-correct cases also pass.
 | 8 / `d11e8a5` | With 10,000 occupied candidates the old sink created candidate 10,001 | Collision exhaustion returns an error, preserves existing content and removes the temporary file |
 
 Verification commands above completed with exit code 0. Container execution used
-rootless Podman. Windows excluded only the same two target-specific tests listed
-in `tests/wine/README.md`; none of the new regressions were excluded.
+rootless Podman. The Wine core/CLI suites exclude the same two target-specific
+tests listed in `tests/wine/README.md`; none of the core review regressions are
+excluded. The app crate's 17 state tests run on Linux, while Wine only compiles
+the Windows app target.
 
 ## Desktop implementation evidence
 
@@ -83,7 +85,7 @@ receive completion timed out waiting for a verified-completion event, and the
 old desktop controller rejected the newly introduced discovery, transfer and
 settings commands. Those observations are retained in
 `/tmp/meshdrop-app-{metadata,completion,discovery,transfers,settings}-red.log`.
-The corresponding feature commits include their tests. Twelve desktop state tests
+The corresponding feature commits include their tests. Seventeen application state tests
 cover receiver lifecycle, invalid configuration, partial discovery, accepted and
 rejected pairing, fingerprint mismatch, accepted/rejected/cancelled transfers,
 and strict persistent notification settings.
@@ -94,3 +96,52 @@ cleanup, text-only rendering and invalid TOML preservation. WebDriver supplies
 chooser results through the existing command; GTK native chooser interaction is
 not automated. Dunst provides notification transport; native GNOME/KDE appearance,
 Windows WebView2 and macOS integration remain in the physical checklist.
+
+## Android build and runtime evidence
+
+`cargo tauri android build --debug --target x86_64` (from the app directory) and
+`:app:testUniversalDebugUnitTest` pass: debug APK produced, 8 JVM tests passed,
+0 failures (private sharing guard 5; multicast lease lifecycle 3). Log:
+`/tmp/meshdrop-stage3-android-build.log`. App QR command tests cover candidate
+addition without trust, unsupported QR versions and manual fallback after bad QR.
+The generated project retains minSdk 24 / targetSdk 36. CI includes a debug ARM64
+build job but hosted CI has not executed. ARM64 runtime is not claimed tested.
+
+Android E2E: **0 scenarios passed; blocked before installation**. The last two
+permitted attempts use the official API34 image with Emulator 36.3.10 and
+swiftshader_indirect/off; both runner exit 1, emulator SIGSEGV (-11).
+`/tmp/meshdrop-stage3-api34-swiftshader.log` and
+`/tmp/meshdrop-stage3-api34-off.log` record failures. Coredump PID 2871558
+(`/tmp/meshdrop-stage3-coredump.log`, inspection exit 0) confirms signal 11 with
+an unresolved frame; a renderer/driver root cause is not established.
+No successful Android sharing intent, background invitation, camera scan or
+notification flow is claimed. See `tests/android/README.md` to run the retained
+script in a working terminal/emulator and `docs/acceptance.md` for real phones.
+
+The selected-file path is injected through the existing command in the Android
+runner; SAF chooser interaction remains a physical check. Private default receive
+files are exposed only by the FileProvider share action with a temporary read
+grant. Emulator NAT pairing uses host 10.0.2.2 and an adb-forwarded receiver port;
+mDNS across that NAT is intentionally not claimed tested.
+
+Reproduce the Android build/JVM checks (these do not boot an emulator):
+
+```sh
+export JAVA_HOME="$HOME/.local/share/meshdrop-android/jdk-17"
+export ANDROID_HOME="$HOME/Android/Sdk"
+export NDK_HOME="$ANDROID_HOME/ndk/28.2.13676358"
+(cd crates/meshdrop-app && cargo tauri android build --debug --target x86_64) && \
+crates/meshdrop-app/gen/android/gradlew -p crates/meshdrop-app/gen/android :app:testUniversalDebugUnitTest
+```
+
+`tests/android/run.sh` includes those checks plus the intended runtime scenarios.
+Its shell/Python syntax checks pass; its revised complete runtime flow remains
+unverified after the host emulator failure budget was exhausted.
+
+APK version regression: the first metadata check failed (exit 1) because the
+Tauri-generated Android project fell back to versionName `1.0`. Gradle now reads
+the root workspace version and derives versionCode without another version
+literal. Rebuilt APK metadata matches Cargo and retains minSdk 24 / targetSdk 36
+(exit 0). Evidence: `/tmp/meshdrop-stage3-apk-version-red.log` and
+`/tmp/meshdrop-stage3-apk-version-green.log`. The runner executes the persistent
+`tests/android/check_apk.py` check before attempting emulator tests.

@@ -21,4 +21,21 @@ Only checks not established by local/Wine/container simulation are listed here.
 
 Container WebDriver injects native chooser results; actual chooser interaction,
 GNOME/KDE presentation, Windows WebView2 and macOS integration are not physically
-verified. Android foreground service and interoperability are the next stage.
+verified. Android foreground service and interoperability require the checks below.
+
+## Android devices (not yet performed)
+
+| Check | Steps | Expected result |
+|---|---|---|
+| Real Wi-Fi mDNS | Put a phone and Fedora/Windows/macOS on the same Wi-Fi; allow multicast, start reception and refresh peers. Repeat with client isolation enabled. | Reachable peers show name/platform/online state. Isolation reports unreachable peers; manual addresses work where routed. No advertisement establishes trust. |
+| Foreground reception / stop | Start reception, press Home, send an invitation, tap its notification and accept; repeat with Reject. Use Stop receiving in the ongoing notification. | Foreground notification remains, tap returns to pending dialog, no automatic acceptance occurs, accepted hashes match and rejection writes nothing. Stop removes advertisement, listener, partial files and MulticastLock. |
+| Doze / battery | Test with screen off and Android Doze; test both optimized and explicitly unrestricted battery settings. Leave receiving beyond the OS dataSync runtime allowance. | Document delays and system restrictions. App reports stopped reception rather than claiming indefinite reception; reopen to receive again after the OS timeout. |
+| Notification permission | On Android 13+, deny POST_NOTIFICATIONS, send an offer while app is visible, then enable permission in system settings and restart. | Denial is explained; explicit in-app decisions still work. After permission is enabled, native invitations and ongoing notification are visible. |
+| Camera QR permission | Scan a real meshdrop QR from another device, compare codes and pair. Repeat with a foreign QR, denied camera permission and a changed certificate. | Only valid versioned meshdrop QR is accepted; both users confirm codes; changed pins are rejected. Denied permission keeps manual/pasted input usable. |
+| Native documents / received sharing | Pick multiple files through the Android document provider and send them. Receive two identically named files, then Share each from Received files. Try an unfinished transfer. | Selected SAF content matches SHA-256 at destination; completed files never overwrite one another; sharing grants temporary read access only to completed private receive files. Partial files and private identities cannot be shared. |
+| OEM background restrictions | Repeat Home, screen-off and notification tests on the user's phone brand, including its battery/auto-start controls. | Record settings required by that manufacturer; do not promise a foreground service bypasses Doze or forced process termination. |
+| Cross-platform interoperability | Pair independently with Fedora, Windows and macOS; transfer Unicode filenames, multiple files, collisions and a large file in both directions; cancel on each side. | Explicit pairing/accept/reject, progress, cancellation cleanup and hash verification work on native devices. |
+
+Android runtime E2E was blocked by the host emulator's native SIGSEGV before App
+installation. Debug APK/JVM tests do not replace these physical checks. See
+`tests/android/README.md` for bounded attempts and the terminal runner.
