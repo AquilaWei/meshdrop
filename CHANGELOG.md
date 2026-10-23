@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.3 - 2026-10-22
+
+PATCH test build; physical-device acceptance has not been performed.
+
+- Fix Android background reception not starting when notification permission was already granted.
+- Android transfers are now verified end-to-end on the emulator: explicit pairing, both directions with SHA-256, rejection, background decision and Stop. Physical-device acceptance is still pending.
+- Use swangle for reliable emulator startup and provide a checksum-pinned container fallback; completed files can be shared through Android's native chooser.
+- Fix the Android CI build after removal of a legacy SDK package; desktop and Android hosted builds are verified.
+
 ## 0.1.2 - 2026-10-22
 
 PATCH test build; physical-device acceptance has not been performed.
