@@ -4,6 +4,7 @@ const $ = selector => document.querySelector(selector);
 const selected = new Set();
 let pairing = null;
 let refreshing = false;
+let androidStarted = false;
 let lastDevices = '';
 let lastInvitations = '';
 function element(tag, content, className) {
@@ -117,6 +118,10 @@ async function poll() {
     const state = await request('snapshot');
     $('#my-name').textContent = state.name;
     if (state.platform === 'android') {
+      $('#android-controls').hidden = false;
+      if (!androidStarted) { androidStarted = true; startAndroid(); }
+      $('#setting-folder').readOnly = true;
+      document.querySelector('footer').textContent = 'Background reception uses the ongoing notification. Stop it explicitly to close the listener.';
       $('#open-folder').disabled = true; $('#open-folder').title = 'Desktop-only. Android receives into app-private storage.';
       const tailscale = document.querySelector('[name=provider][value=tailscale]');
       tailscale.disabled = true; tailscale.parentNode.title = 'Desktop-only. Use manual VPN addresses on Android.';
@@ -167,3 +172,28 @@ $('#settings-form').addEventListener('submit', event => {
 });
 $('#save-toml').addEventListener('click', () => saveSettings({toml:$('#settings-toml').value}));
 act('settings').then(renderSettings).catch(() => { /* act renders configuration errors */ });
+
+async function receivedFiles() {
+  const result = await act('received_files');
+  $('#received-files').replaceChildren();
+  for (const name of result.files) {
+    const row = element('div'); row.append(element('span', name));
+    const share = element('button','Share');
+    share.addEventListener('click', () => act('share_file',{name}).catch(() => {}));
+    row.append(share); $('#received-files').append(row);
+  }
+}
+async function startAndroid() {
+  try {
+    const result = await act('android_start');
+    $('#android-permission').textContent = result.permission === 'granted'
+      ? 'Background reception enabled. Incoming invitations require your acceptance.'
+      : 'Notifications denied. Enable notifications in Android Settings to see incoming alerts; invitations still require acceptance in the app.';
+    await receivedFiles();
+  } catch (_) { $('#android-permission').textContent = 'Background reception could not start. Keep the app visible and review the error.'; }
+}
+$('#received-refresh').addEventListener('click', () => receivedFiles().catch(() => {}));
+$('#stop-receiver').addEventListener('click', async () => {
+  try { await act('android_stop'); $('#service-state').textContent = 'Reception stopped'; $('#android-permission').textContent = 'Reception stopped. Reopen the app to start again.'; }
+  catch (_) { /* displayed */ }
+});

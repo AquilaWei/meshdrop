@@ -151,7 +151,20 @@ using the development command above, then install the generated debug APK with
 installation from that source. Only Gradle's automatic debug key is used.
 
 Received files land in app-private storage without broad storage permission;
-uninstalling the app deletes that storage. Native file sharing and background
-reception integration are being added in this stage and are not yet verified.
+uninstalling the app deletes that storage. Use **Refresh received files → Share** to hand a completed file to Android's
+native share chooser without adb. Only that one receive directory is exposed
+through FileProvider, with a temporary read grant. Partial files and paths outside
+it cannot be shared. Android document selection imports SAF URIs into private
+send-cache files using bounded buffers; no broad storage permission is requested.
+
+On Android 13+, allow notification permission when requested. Denying it is shown
+in the app; incoming invitations still require explicit acceptance. Background
+reception uses an ongoing notification with **Stop receiving**. Home keeps the
+receiver process alive through a dataSync foreground service and holds the Wi-Fi
+multicast lock. Stop releases the lock, cancels transfers and closes the listener.
+Android 15+ may limit dataSync background runtime; after the system stops it,
+reopen the app to start receiving again. Doze and OEM policies need real-device
+acceptance. These native runtime flows are implemented but emulator verification
+may be blocked by a host emulator crash; see `tests/android/README.md`.
 Tailscale enumeration and desktop folder opening are unavailable on Android;
 use a manual private VPN address instead. The receive path is shown in Settings.
