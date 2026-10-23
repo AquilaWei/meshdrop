@@ -114,13 +114,15 @@ with tempfile.TemporaryDirectory(prefix='meshdrop-android-') as temporary:
         adb('shell','input','keyevent','82')
         apk = Path(os.environ.get('MESHDROP_ANDROID_APK', 'crates/meshdrop-app/gen/android/app/build/outputs/apk/universal/debug/app-universal-debug.apk'))
         adb('install','-r',str(apk))
+        fixture = os.environ.get('MESHDROP_SHARE_FIXTURE', 'tests/android/share-fixture/build/outputs/apk/debug/meshdrop-share-fixture-debug.apk')
+        adb('install', '-r', fixture)
         adb('shell','pm','grant',PACKAGE,'android.permission.POST_NOTIFICATIONS')
         adb('forward','tcp:19843','tcp:9843')
         # Fresh Google API images update system components through boot broadcasts.
         # Wait for those queued changes before launching the app or its chooser.
         adb('shell', 'am', 'wait-for-broadcast-idle', timeout=120)
         adb('logcat','-c')
-        adb('shell','am','start','-n',PACKAGE+'/.MainActivity')
+        adb('shell','am','start','-a','android.intent.action.SEND','-n','org.meshdrop.fixture/.ShareActivity','-d','content://org.meshdrop.fixture/documents/one')
         sockets = wait(lambda: [line.split('@')[-1] for line in adb('shell','cat','/proc/net/unix').decode().splitlines() if 'webview_devtools_remote_' in line])
         adb('forward','tcp:19222','localabstract:'+sockets[0])
         def page():
@@ -132,6 +134,8 @@ with tempfile.TemporaryDirectory(prefix='meshdrop-android-') as temporary:
         service = adb('shell','dumpsys','activity','services',PACKAGE).decode()
         assert 'ReceiverService' in service and 'isForeground=true' in service, service
         print('PASS: Android starts a foreground receiver', flush=True)
+        wait(lambda: cdp.call('snapshot').get('selected_files') == ['shared-one.txt'])
+        print('PASS: cold ACTION_SEND imports granted external content URI', flush=True)
         cli = root/'cli'; cli.mkdir()
         received = root/'linux-received'; received.mkdir()
         (cli/'config.toml').write_text(f'name = "Linux peer"\nport = 19844\nproviders = []\nreceive_directory = "{received}"\n')
@@ -157,7 +161,21 @@ with tempfile.TemporaryDirectory(prefix='meshdrop-android-') as temporary:
         assert sender.wait(timeout=30) == 0
         content = adb('exec-out','run-as',PACKAGE,'cat','files/meshdrop/received/'+source.name)
         assert hashlib.sha256(content).digest() == hashlib.sha256(source.read_bytes()).digest()
-        print('PASS: accepted Linux-to-Android content matches SHA-256', flush=True)
+        public = adb('exec-out', 'cat', '/sdcard/Download/'+source.name)
+        assert hashlib.sha256(public).digest() == hashlib.sha256(source.read_bytes()).digest()
+        wait(lambda: 'Download/'+source.name in cdp.text('#transfers'))
+        print('PASS: verified receive appears in public Download with saved location and matching SHA-256', flush=True)
+        # A second receive must create a different public entry without overwrite.
+        original = source.read_bytes()
+        source.write_bytes(b'second collision payload\n')
+        duplicate = subprocess.Popen(['target/debug/meshdrop','--state-dir',str(cli),'send','127.0.0.1:19843',str(source)], stdout=send_log, stderr=send_log)
+        processes.append(duplicate)
+        wait(lambda: cdp.call('snapshot')['invitations']); cdp.click('#invitations [data-action=accept]')
+        assert duplicate.wait(timeout=30) == 0
+        assert adb('exec-out', 'cat', '/sdcard/Download/'+source.name) == original
+        collision = adb('exec-out', 'cat', '/sdcard/Download/linux-to-android (1).txt')
+        assert collision == b'second collision payload\n', repr(collision)
+        print('PASS: public Download collision preserves both files', flush=True)
         cdp.click('#show-more')
         cdp.click('#received-refresh')
         wait(lambda: source.name in cdp.text('#received-files'))
@@ -179,18 +197,27 @@ with tempfile.TemporaryDirectory(prefix='meshdrop-android-') as temporary:
         wait(lambda: '127.0.0.1:1' in cdp.text('#problems'))
         assert '127.0.0.1:1' not in cdp.text('#devices')
         print('PASS: unresolved candidate stays in More diagnostics', flush=True)
-        cdp.call('select_files', ['/data/user/0/'+PACKAGE+'/files/meshdrop/received/'+source.name])
         cdp.click('#show-send')
-        cdp.click('#devices input[type=checkbox]'); cdp.click('#send')
-        wait(lambda: (received/source.name).exists())
-        assert hashlib.sha256((received/source.name).read_bytes()).digest() == hashlib.sha256(source.read_bytes()).digest()
-        print('PASS: Android-to-Linux content matches SHA-256', flush=True)
+        cdp.click('#devices button:not(:disabled)')
+        wait(lambda: (received/'shared-one.txt').exists())
+        assert (received/'shared-one.txt').read_bytes() == b'Shared content one\n'
+        print('PASS: cold ACTION_SEND transfers imported file to Linux by tapping device', flush=True)
+        cdp.click('#show-more')
+        adb('shell','am','start','-a','android.intent.action.SEND_MULTIPLE','-n','org.meshdrop.fixture/.ShareActivity','-d','content://org.meshdrop.fixture/documents/one')
+        wait(lambda: cdp.call('snapshot').get('selected_files') == ['shared-one.txt', 'shared-two.txt'])
+        wait(lambda: cdp.evaluate('document.querySelector("#more-page").hidden'))
+        cdp.click('#devices button:not(:disabled)')
+        wait(lambda: (received/'shared-two.txt').exists())
+        assert (received/'shared-one (1).txt').read_bytes() == b'Shared content one\n'
+        assert (received/'shared-two.txt').read_bytes() == b'Shared content two\n'
+        print('PASS: warm ACTION_SEND_MULTIPLE imports both external content URIs and transfers to Linux', flush=True)
         rejected = root/'rejected.txt'; rejected.write_bytes(b'must not arrive')
         sender = subprocess.Popen(['target/debug/meshdrop','--state-dir',str(cli),'send','127.0.0.1:19843',str(rejected)], stdout=send_log, stderr=send_log)
         processes.append(sender)
         wait(lambda: cdp.call('snapshot')['invitations']); cdp.click('#invitations [data-action=reject]')
         assert sender.wait(timeout=30) != 0
-        assert adb('shell','run-as',PACKAGE,'ls','-A','files/meshdrop/received').decode().strip() == source.name
+        assert 'rejected.txt' not in adb('shell','ls','-A','/sdcard/Download').decode()
+        assert '.part' not in adb('shell','ls','-A','/sdcard/Download').decode()
         print('PASS: rejected invitation writes no content', flush=True)
         adb('shell','input','keyevent','3')
         sender = subprocess.Popen(['target/debug/meshdrop','--state-dir',str(cli),'send','127.0.0.1:19843',str(rejected)], stdout=send_log, stderr=send_log)
@@ -204,7 +231,7 @@ with tempfile.TemporaryDirectory(prefix='meshdrop-android-') as temporary:
         cdp.click('#stop-receiver')
         wait(lambda: 'isForeground=true' not in adb('shell','dumpsys','activity','services',PACKAGE).decode())
         print('PASS: stop receiving action stops foreground service', flush=True)
-        print('9 Android scenarios passed; 0 failed', flush=True)
+        print('12 Android scenarios passed; 0 failed', flush=True)
     except Exception:
         try:
             print(adb('logcat','-b','crash','-d').decode(errors='replace'), flush=True)

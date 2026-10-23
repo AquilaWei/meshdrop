@@ -1,5 +1,6 @@
 //! Thin Android lifecycle/content bridge; decisions and transfer state remain in core.
 use crate::service::Controller;
+use anyhow::Context;
 use serde_json::{Value, json};
 use tauri::{
     Manager,
@@ -29,7 +30,12 @@ pub async fn request(
 ) -> Option<Result<Value, String>> {
     if !matches!(
         operation,
-        "android_start" | "android_stop" | "received_files" | "share_file" | "pick_files"
+        "android_start"
+            | "android_stop"
+            | "received_files"
+            | "share_file"
+            | "pick_files"
+            | "shared_files"
     ) {
         return None;
     }
@@ -73,6 +79,21 @@ pub async fn request(
                 "android_stop" => bridge.0.run_mobile_plugin("stop", json!({})),
                 "received_files" => bridge.0.run_mobile_plugin("files", json!({})),
                 "share_file" => bridge.0.run_mobile_plugin("share", payload),
+                "shared_files" => {
+                    let value: Value = bridge
+                        .0
+                        .run_mobile_plugin("shared", json!({}))
+                        .map_err(|e| e.to_string())?;
+                    if value["paths"]
+                        .as_array()
+                        .is_some_and(|paths| !paths.is_empty())
+                    {
+                        tauri::async_runtime::block_on(
+                            controller.call("select_files", value["paths"].clone()),
+                        )?;
+                    }
+                    return Ok(value);
+                }
                 "pick_files" => {
                     let value: Value = bridge
                         .0
@@ -90,4 +111,16 @@ pub async fn request(
         .map_err(|e| e.to_string())
         .and_then(|result| result),
     )
+}
+
+/// Publishes only core-verified files; native pending entries are cleaned on failure.
+pub fn publisher(app: tauri::AppHandle) -> meshdrop_core::transfer::ReceivePublisher {
+    std::sync::Arc::new(move |path| {
+        let bridge = app.state::<Bridge>();
+        let value: Value = bridge.0.run_mobile_plugin("publish", json!({"name":path.file_name().context("received file has no name")?.to_string_lossy()}))?;
+        Ok(value["location"]
+            .as_str()
+            .context("native publisher returned no location")?
+            .to_owned())
+    })
 }

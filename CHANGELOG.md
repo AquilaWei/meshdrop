@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.5 - 2026-10-23
+
+PATCH test build; full physical-device transfer acceptance is pending.
+
+- Save desktop and CLI receives to the system Downloads folder by default; resolve configured relative folders beside the configuration file.
+- Publish verified Android 10+ receives in public Download without broad storage permission; show each saved location and keep received-file sharing available. Android 9 and below retain private storage.
+- Accept one or multiple files from Android’s system share sheet, including when meshdrop is already open.
+- Send by tapping a device, opening the file chooser first when needed. Unpaired devices invite automatically after both users confirm the code; each transfer keeps its own status and cancellation.
+
 ## 0.1.4 - 2026-10-23
 
 PATCH test build; physical-device acceptance is pending.

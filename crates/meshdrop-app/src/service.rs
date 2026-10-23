@@ -33,6 +33,14 @@ impl Controller {
     /// Binds before returning so port conflicts fail startup rather than losing reception.
     /// Directory, identity, TOML, multicast and listener failures are returned to the shell.
     pub async fn start(directory: PathBuf, notices: mpsc::Sender<Notice>) -> Result<Self> {
+        Self::start_with_publisher(directory, notices, None).await
+    }
+    /// Starts a receiver whose verified files can be published by a native platform.
+    pub async fn start_with_publisher(
+        directory: PathBuf,
+        notices: mpsc::Sender<Notice>,
+        publisher: Option<transfer::ReceivePublisher>,
+    ) -> Result<Self> {
         let folder = directory.clone();
         let (config, identity) = tokio::task::spawn_blocking(move || {
             let config = platform_config(
@@ -58,13 +66,13 @@ impl Controller {
         let (progress_tx, progress) = mpsc::channel(16);
         let stop = CancellationToken::new();
         let (done_tx, done) = watch::channel(false);
-        let server = tokio::spawn(transfer::serve(
+        let server = tokio::spawn(transfer::serve_with_publisher(
             listener,
             config.clone(),
             directory.clone(),
             identity.clone(),
             invitation_tx,
-            progress_tx,
+            (progress_tx, publisher),
             stop.clone(),
         ));
         let actor = Actor {
@@ -331,6 +339,7 @@ impl Actor {
             if row["status"] == "cancelled" || row["status"] == "complete" {
                 return;
             }
+            let receiving = row["direction"] == "receive";
             if let Some(file) = row["files"]
                 .as_array_mut()
                 .expect("files")
@@ -340,6 +349,9 @@ impl Actor {
                 file["bytes"] = json!(event.bytes);
                 file["total"] = json!(event.total);
                 file["status"] = json!(event.status);
+                if event.status == ProgressStatus::Complete && receiving {
+                    file["saved_location"] = json!(event.detail);
+                }
             }
             row["status"] = json!("accepted");
             if event.status == ProgressStatus::Failed {
@@ -706,11 +718,12 @@ async fn local_address(peer: &str, port: u16) -> Result<String> {
     socket.connect(destination).await?;
     Ok(std::net::SocketAddr::new(socket.local_addr()?.ip(), port).to_string())
 }
-/// Resolves private relative destinations inside the selected Android profile.
+/// Keeps Android staging private regardless of the desktop configuration.
 /// Desktop paths remain compatible with the CLI; actual filesystem failures propagate.
 pub fn platform_config(mut config: Config, directory: &std::path::Path, android: bool) -> Config {
-    if android && config.receive_directory.is_relative() {
-        config.receive_directory = directory.join(&config.receive_directory);
+    if android {
+        // Android always stages inside the profile; API 29+ publishes verified files.
+        config.receive_directory = directory.join("received");
     }
     config
 }
@@ -737,7 +750,10 @@ mod android_policy_tests {
             std::path::Path::new("/private/meshdrop"),
             false,
         );
-        assert_eq!(config.receive_directory, PathBuf::from("received"));
+        assert_eq!(
+            config.receive_directory,
+            meshdrop_core::config::default_receive_directory()
+        );
     }
 }
 
@@ -928,6 +944,10 @@ mod tests {
         let received = wait_status(&second, "complete").await;
         assert_eq!(sent["transfers"][0]["files"][0]["bytes"], 15);
         assert_eq!(received["transfers"][0]["files"][0]["status"], "complete");
+        assert_eq!(
+            received["transfers"][0]["files"][0]["saved_location"],
+            b.path().join("received/video.txt").display().to_string()
+        );
         assert_eq!(
             std::fs::read(b.path().join("received/video.txt")).unwrap(),
             b"desktop payload"

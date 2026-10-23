@@ -114,6 +114,10 @@ struct Active {
 struct Inner {
     active: HashMap<String, Active>,
 }
+/// Publishes a verified private file and returns its user-visible destination.
+/// Runs on a blocking storage thread; errors fail reception before completion.
+pub type ReceivePublisher = Arc<dyn Fn(PathBuf) -> Result<String> + Send + Sync>;
+
 #[derive(Clone)]
 struct ServerState {
     config: Config,
@@ -122,6 +126,7 @@ struct ServerState {
     invitations: mpsc::Sender<Invitation>,
     progress: mpsc::Sender<Progress>,
     inner: Arc<Mutex<Inner>>,
+    publisher: Option<ReceivePublisher>,
 }
 type ApiResult<T> = std::result::Result<Json<T>, (StatusCode, String)>;
 fn api_error(error: impl std::fmt::Display) -> (StatusCode, String) {
@@ -145,6 +150,30 @@ pub async fn serve(
     progress: mpsc::Sender<Progress>,
     shutdown: CancellationToken,
 ) -> Result<()> {
+    serve_with_publisher(
+        listener,
+        config,
+        directory,
+        identity,
+        invitations,
+        (progress, None),
+        shutdown,
+    )
+    .await
+}
+
+/// Runs the receiver with optional platform publication after integrity verification.
+/// The publisher must remove pending public entries when it returns an error.
+pub async fn serve_with_publisher(
+    listener: TcpListener,
+    config: Config,
+    directory: PathBuf,
+    identity: Arc<Identity>,
+    invitations: mpsc::Sender<Invitation>,
+    destination: (mpsc::Sender<Progress>, Option<ReceivePublisher>),
+    shutdown: CancellationToken,
+) -> Result<()> {
+    let (progress, publisher) = destination;
     tokio::fs::create_dir_all(&config.receive_directory).await?;
     let tls = rustls::ServerConfig::builder_with_provider(Arc::new(
         rustls::crypto::ring::default_provider(),
@@ -166,6 +195,7 @@ pub async fn serve(
         directory,
         invitations,
         progress,
+        publisher,
     };
     let router = Router::new()
         .route("/info", get(info))
@@ -529,7 +559,11 @@ async fn upload(
         let token = cancel.clone();
         let path =
             storage_task(move || sink.finish_if(size, &digest, || !token.is_cancelled())).await?;
-        Ok::<_, anyhow::Error>(path.display().to_string())
+        if let Some(publish) = s.publisher.clone() {
+            storage_task(move || publish(path)).await
+        } else {
+            Ok::<_, anyhow::Error>(path.display().to_string())
+        }
     };
     let result = tokio::select! { _ = cancel.cancelled() => Err(anyhow::anyhow!("transfer cancelled")), result = receive => result };
     s.progress
@@ -539,7 +573,10 @@ async fn upload(
             } else {
                 ProgressStatus::Failed
             },
-            detail: result.as_ref().err().map(|error| format!("{error:#}")),
+            detail: Some(match &result {
+                Ok(location) => location.clone(),
+                Err(error) => format!("{error:#}"),
+            }),
             transfer: id.clone(),
             name: file.name.clone(),
             bytes: if result.is_ok() { file.size } else { 0 },
@@ -789,6 +826,9 @@ mod tests {
     }
     impl Harness {
         async fn new(timeout_seconds: u64) -> Self {
+            Self::with_publisher(timeout_seconds, None).await
+        }
+        async fn with_publisher(timeout_seconds: u64, publisher: Option<ReceivePublisher>) -> Self {
             let dir = tempfile::tempdir().unwrap();
             let receiver = dir.path().join("received");
             let state = dir.path().join("server");
@@ -817,7 +857,7 @@ mod tests {
             let stop = CancellationToken::new();
             let source = dir.path().join("source.txt");
             std::fs::write(&source, b"hello").unwrap();
-            let server = tokio::spawn(serve(
+            let server = tokio::spawn(serve_with_publisher(
                 listener,
                 Config {
                     receive_directory: receiver.clone(),
@@ -828,7 +868,7 @@ mod tests {
                 state,
                 Arc::new(server_id),
                 tx,
-                progress_tx,
+                (progress_tx, publisher),
                 stop.clone(),
             ));
             Self {
@@ -870,6 +910,56 @@ mod tests {
         assert_eq!(
             std::fs::read(h.receiver.join("source.txt")).unwrap(),
             b"hello"
+        );
+        h.finish().await;
+    }
+    #[tokio::test]
+    async fn publisher_receives_verified_bytes_and_reports_public_location() {
+        let publisher: ReceivePublisher = Arc::new(|path| {
+            assert_eq!(std::fs::read(path)?, b"hello");
+            Ok("Download/source.txt".into())
+        });
+        let mut h = Harness::with_publisher(10, Some(publisher)).await;
+        let sending = h.sending(CancellationToken::new());
+        h.invitations
+            .recv()
+            .await
+            .unwrap()
+            .decision
+            .send(Decision::Accept)
+            .unwrap();
+        sending.await.unwrap().unwrap();
+        h.progress.recv().await.unwrap();
+        assert_eq!(
+            h.progress.recv().await.unwrap().detail.as_deref(),
+            Some("Download/source.txt")
+        );
+        h.finish().await;
+    }
+    #[tokio::test]
+    async fn publication_error_fails_receive_instead_of_claiming_completion() {
+        let publisher: ReceivePublisher = Arc::new(|_| bail!("Download unavailable"));
+        let mut h = Harness::with_publisher(10, Some(publisher)).await;
+        let sending = h.sending(CancellationToken::new());
+        h.invitations
+            .recv()
+            .await
+            .unwrap()
+            .decision
+            .send(Decision::Accept)
+            .unwrap();
+        assert!(
+            sending
+                .await
+                .unwrap()
+                .unwrap_err()
+                .to_string()
+                .contains("Download unavailable")
+        );
+        h.progress.recv().await.unwrap();
+        assert_eq!(
+            h.progress.recv().await.unwrap().status,
+            ProgressStatus::Failed
         );
         h.finish().await;
     }
@@ -1049,8 +1139,13 @@ mod tests {
         response.await.unwrap()
     }
     #[tokio::test]
-    async fn corrupt_stream_is_deleted() {
-        let mut h = Harness::new(10).await;
+    async fn corrupt_stream_is_deleted_without_publication() {
+        let (published, mut publication) = mpsc::channel(1);
+        let publisher: ReceivePublisher = Arc::new(move |_| {
+            published.try_send(()).unwrap();
+            Ok("must not publish".into())
+        });
+        let mut h = Harness::with_publisher(10, Some(publisher)).await;
         let id = raw_offer(&mut h, 3, "00".repeat(32)).await;
         let response = h
             .client
@@ -1061,6 +1156,10 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(
+            publication.try_recv(),
+            Err(mpsc::error::TryRecvError::Empty)
+        );
         assert_eq!(std::fs::read_dir(&h.receiver).unwrap().count(), 0);
         h.finish().await;
     }

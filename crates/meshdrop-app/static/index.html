@@ -8,11 +8,11 @@
 <div id="error" role="alert" hidden></div>
 <section id="fingerprint-error" role="alert" hidden><h2>Fingerprint mismatch</h2><p>The stored identity and the peer certificate differ. Connection refused. Verify the device locally before changing trust.</p></section>
 <div id="send-page">
-<section><div class="section-heading"><h2>1. Search devices</h2><button id="refresh">Search again</button></div><div id="devices"></div></section>
+<section><div class="section-heading"><h2>Devices · tap to send</h2><button id="refresh">Search again</button></div><div id="devices"></div></section>
 
-<section><div class="section-heading"><h2>2. Choose files</h2><button id="pick-files">Choose files…</button></div><p id="selected-files">No files selected</p></section>
+<section><div class="section-heading"><h2>Files</h2><button id="pick-files">Choose files…</button></div><p id="selected-files">No files selected</p></section>
 
-<section><div class="section-heading"><h2>3. Send and wait for results</h2><button id="send">Send to selected devices</button></div><div id="transfers"></div></section>
+<section><div class="section-heading"><h2>Transfers</h2></div><div id="transfers"></div></section>
 </div>
 <div id="more-page" hidden>
 <section id="android-controls" hidden><h2>Android reception</h2><p>Tailscale enumeration and opening receive folders are desktop-only. Use manual VPN addresses and Share below to access received files.</p><p id="android-permission" role="status"></p><button id="stop-receiver">Stop receiving</button><button id="scan-qr">Scan pairing QR</button><p>Manual addresses remain available when camera permission is denied.</p><h3>Received files</h3><button id="received-refresh">Refresh received files</button><div id="received-files"></div></section>

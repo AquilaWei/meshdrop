@@ -1,0 +1,6 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application android:label="meshdrop test documents">
+        <activity android:name=".ShareActivity" android:exported="true" />
+        <provider android:name=".Documents" android:authorities="org.meshdrop.fixture" android:exported="false" android:grantUriPermissions="true" />
+    </application>
+</manifest>

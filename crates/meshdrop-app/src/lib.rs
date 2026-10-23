@@ -35,7 +35,9 @@ async fn desktop_request(
         return Ok(serde_json::Value::Null);
     }
     if operation == "open_receive_directory" && cfg!(target_os = "android") {
-        return Err("Opening receive folders is desktop-only; Android files are stored in app-private storage".into());
+        return Err(
+            "Opening receive folders is desktop-only; Android 10+ receives are in Download".into(),
+        );
     }
     if operation == "open_receive_directory" {
         let path = state
@@ -65,13 +67,23 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             let (notices, mut events) = tokio::sync::mpsc::channel(16);
-            let controller = tauri::async_runtime::block_on(Controller::start(
+            let controller = tauri::async_runtime::block_on(Controller::start_with_publisher(
                 if cfg!(target_os = "android") {
                     app.path().app_data_dir()?.join("files/meshdrop")
                 } else {
                     service::state_directory()?
                 },
                 notices,
+                {
+                    #[cfg(target_os = "android")]
+                    {
+                        Some(android::publisher(app.handle().clone()))
+                    }
+                    #[cfg(not(target_os = "android"))]
+                    {
+                        None
+                    }
+                },
             ))?;
             app.manage(controller.clone());
             let handle = app.handle().clone();

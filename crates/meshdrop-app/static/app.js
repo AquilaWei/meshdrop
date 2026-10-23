@@ -1,9 +1,9 @@
 'use strict';
 const request = (operation, payload = null) => window.__TAURI__.core.invoke('desktop_request', {operation, payload});
 const $ = selector => document.querySelector(selector);
-const selected = new Set();
+let chosenFiles = [];
+let checkingShares = false;
 let pairing = null;
-let currentDevices = [];
 let sendQueue = [];
 let sending = false;
 let refreshing = false;
@@ -45,23 +45,18 @@ async function preparePair(address) {
   } catch (_) { sendQueue = []; finishSending(); }
 }
 function devices(items) {
-  currentDevices = items;
-  for (const target of selected) {
-    if (!items.some(device => device.target === target)) selected.delete(target);
-  }
   const signature = JSON.stringify(items);
   if (signature === lastDevices) return;
   lastDevices = signature;
   $('#devices').replaceChildren();
   for (const device of items) {
-    const row = element('div', undefined, 'device');
-    const checkbox = element('input');
-    checkbox.type = 'checkbox'; checkbox.disabled = !device.online || device.mismatch;
-    checkbox.checked = selected.has(device.target); checkbox.setAttribute('aria-label', `Select ${device.name}`);
-    checkbox.addEventListener('change', () => checkbox.checked ? selected.add(device.target) : selected.delete(device.target));
-    const description = element('div', undefined, 'description');
+    const row = element('button', undefined, 'device');
+    row.disabled = !device.online || device.mismatch;
+    row.setAttribute('aria-label', `Send to ${device.name}`);
+    row.addEventListener('click', () => tapDevice(device));
+    const description = element('span', undefined, 'description');
     description.append(element('strong', device.name), element('small', `${device.platform} · ${device.online ? 'Online' : 'Offline'} · ${device.paired ? 'Paired' : 'Unpaired'}`), element('small', device.addresses.join(', ')));
-    row.append(checkbox, description);
+    row.append(description);
     if (device.mismatch) row.append(element('strong', 'Fingerprint mismatch'));
     $('#devices').append(row);
   }
@@ -103,6 +98,9 @@ function transfers(items) {
     for (const file of transfer.files) {
       const percent = file.status === 'complete' ? 100 : file.total ? Math.floor(100*file.bytes/file.total) : 0;
       box.append(element('p', `${file.name} · ${percent}% · ${file.bytes}/${file.total} bytes`));
+      if (transfer.direction === 'receive' && file.saved_location) {
+        box.append(element('p', `Saved to: ${file.saved_location}`, 'saved-location'));
+      }
       const bar = element('progress'); bar.max = 100; bar.value = percent; bar.setAttribute('aria-label', file.name); box.append(bar);
     }
     if (transfer.error) box.append(element('p', transfer.error));
@@ -130,7 +128,8 @@ async function poll() {
       if (!androidStarted) { androidStarted = true; startAndroid(); }
       $('#setting-folder').readOnly = true;
       document.querySelector('footer').textContent = 'Background reception uses the ongoing notification. Stop it explicitly to close the listener.';
-      $('#open-folder').disabled = true; $('#open-folder').title = 'Desktop-only. Android receives into app-private storage.';
+      $('#open-folder').disabled = true; $('#open-folder').title = 'Android 10+ saves verified files in Download; older Android uses private storage.';
+      checkSharedFiles();
       const tailscale = document.querySelector('[name=provider][value=tailscale]');
       tailscale.disabled = true; tailscale.parentNode.title = 'Desktop-only. Use manual VPN addresses on Android.';
     }
@@ -138,7 +137,8 @@ async function poll() {
     $('#qr-content').textContent = state.qr_content;
     $('#service-state').textContent = `Receiving on port ${state.port}`;
     drawQR(state.qr); devices(state.devices); invitations(state.invitations); transfers(state.transfers);
-    $('#selected-files').textContent = (state.selected_files || []).join(', ') || 'No files selected';
+    chosenFiles = state.selected_files || [];
+    $('#selected-files').textContent = chosenFiles.join(', ') || 'No files selected';
     $('#problems').replaceChildren(...state.problems.map(problem => element('li', `${problem.provider}: ${problem.error}`)));
     if (state.error) failure(state.error);
   } catch (error) { failure(error); }
@@ -150,7 +150,6 @@ $('#manual').addEventListener('submit', async event => {
 $('#refresh').addEventListener('click', refresh);
 function finishSending() {
   sending = false;
-  $('#send').disabled = false;
 }
 function cancelPairing() {
   pairing = null; sendQueue = []; $('#outgoing-pair').close(); finishSending();
@@ -182,14 +181,26 @@ $('#pair-confirm').addEventListener('click', async () => {
 poll(); refresh(); setInterval(poll, 300); setInterval(refresh, 8000);
 
 $('#pick-files').addEventListener('click', async () => { try { await act('pick_files'); await poll(); } catch (_) { /* rendered */ } });
-$('#send').addEventListener('click', async () => {
-  if (sending) return;
-  if (!selected.size) { failure('Select at least one device.'); return; }
-  if ($('#selected-files').textContent === 'No files selected') { failure('Choose files first.'); return; }
-  sending = true; $('#send').disabled = true;
-  sendQueue = currentDevices.filter(device => selected.has(device.target));
-  await nextTarget();
-});
+async function tapDevice(device) {
+  try {
+    if (!chosenFiles.length) {
+      const files = await act('pick_files');
+      if (!files || !files.length) return;
+      await poll();
+    }
+    sendQueue.push(device);
+    if (!sending) { sending = true; await nextTarget(); }
+  } catch (_) { /* act renders errors; another device can still be tapped. */ }
+}
+async function checkSharedFiles() {
+  if (checkingShares) return;
+  checkingShares = true;
+  try {
+    const result = await request('shared_files');
+    if (result.paths && result.paths.length) { showPage(false); await poll(); }
+  } catch (error) { failure(error); }
+  finally { checkingShares = false; }
+}
 function showPage(more) {
   $('#send-page').hidden = more;
   $('#more-page').hidden = !more;

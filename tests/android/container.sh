@@ -24,6 +24,7 @@ echo "95771e0ae431897b2a4bd2d97fa095f29a8b0624a7b216baf529f9306161c266  $context
 container=$("$engine" create --network host --device /dev/kvm --group-add keep-groups --security-opt label=disable -v "$sdk:/opt/android-sdk:ro" -v meshdrop-android-target:/workspace/target -v meshdrop-android-registry:/usr/local/cargo/registry -e MESHDROP_EMULATOR="${MESHDROP_CONTAINER_EMULATOR:-/opt/emulator/emulator}" -e MESHDROP_EMULATOR_TRACE="${MESHDROP_EMULATOR_TRACE:-0}" -e MESHDROP_EMULATOR_GPU="${MESHDROP_EMULATOR_GPU:-swangle}" meshdrop-android)
 git ls-files --cached --others --exclude-standard -z | tar --null --exclude=build --exclude=.gradle --exclude=.kotlin --exclude=.tauri --exclude=jniLibs --exclude=local.properties --exclude='*.keystore' --exclude='*.jks' --exclude=.git --exclude=target --exclude=.harnessboard --exclude=.aws --exclude=.codex --exclude=.agents --exclude=.claude --exclude=notes --exclude=CLAUDE.md -T - -cf - | "$engine" cp - "$container:/workspace/"
 "$engine" cp "$apk" "$container:/workspace/app.apk"
+"$engine" cp tests/android/share-fixture/build/outputs/apk/debug/meshdrop-share-fixture-debug.apk "$container:/workspace/share-fixture.apk"
 "$engine" start -a "$container"
 status=$("$engine" inspect --format '{{.State.ExitCode}}' "$container")
 exit "$status"

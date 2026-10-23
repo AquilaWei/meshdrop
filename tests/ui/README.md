@@ -11,9 +11,10 @@ WebKitGTK, WebKitWebDriver, tauri-driver, Xvfb and Dunst. No host packages are
 installed. The runner checks formatting, Clippy and all workspace Rust tests,
 then drives the real desktop app against a separate CLI process.
 
-Nine scenarios cover background reception and mDNS discovery, pairing during Send with automatic invitation,
+Nine scenarios cover background reception and automatic mDNS discovery, tap-to-send
+with no selected files, pairing with automatic invitation,
 paired sends without another code prompt, app-to-CLI transfer with 100% progress and SHA-256 verification, CLI-to-app
-acceptance and verified storage, rejection cleanup, untrusted text rendering,
+acceptance, verified storage and saved-location display, rejection cleanup, untrusted text rendering,
 unresolved/non-meshdrop candidate diagnostics, and strict TOML errors that preserve the saved configuration.
 
 WebDriver cannot operate GTK's native file chooser. The scenario supplies the

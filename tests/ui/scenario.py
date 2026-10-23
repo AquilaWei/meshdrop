@@ -100,6 +100,7 @@ def main(root):
     wait(lambda: http("GET", "/status"))
     session = http("POST", "/session", {"capabilities": {"alwaysMatch": {"tauri:options": {"application": str(Path("target/debug/meshdrop-app").resolve())}}}})["sessionId"]
     wait(lambda: "Receiving on port 19843" in text("#service-state"))
+    assert not js("return document.querySelector('#send, #devices input[type=checkbox]')")
     wait(lambda: peer_name in text("#devices"), 45)
     assert js("return document.querySelector('#qr').width > 100")
     assert "meshdrop://" in text("#qr-content")
@@ -119,14 +120,21 @@ def main(root):
     # dialog callback. Transport, state, UI rendering and filesystem remain real.
     source = root / "payload <img src=x onerror=alert(1)>.txt"
     source.write_bytes(b"meshdrop ui payload\n" * 131072)
-    click("#devices input[type=checkbox]:not(:disabled)")
-    selection = http("POST", f"/session/{session}/execute/async", {
-        "script": "const done = arguments[arguments.length - 1]; window.__TAURI__.core.invoke('desktop_request', {operation:'select_files', payload:arguments[0]}).then(result => done({result})).catch(error => done({error:String(error)}));",
-        "args": [[str(source)]],
-    })
-    assert "error" not in selection, selection
+    # Supply only the native chooser result; tapping with no selection must ask
+    # for files and then continue to pairing without another device/send click.
+    js("""const original = act;
+        const chooserPath = arguments[0];
+        window.chooserCalls = 0;
+        act = (operation, payload) => {
+            if (operation === 'pick_files') {
+                window.chooserCalls++;
+                return original('select_files', [chooserPath]);
+            }
+            return original(operation, payload);
+        }; return true;""", [str(source)])
+    click("#devices button:not(:disabled)")
     wait(lambda: source.name in text("#selected-files"))
-    click("#send")
+    assert js("return window.chooserCalls") == 1
     wait(lambda: js("return document.querySelector('#outgoing-pair').open"))
     code = text("#pair-code")
     assert re.fullmatch(r"\d{6}", code)
@@ -135,18 +143,18 @@ def main(root):
     receiver.stdin.write(b"y\n"); receiver.stdin.flush()
     wait(lambda: "Complete" in text("#transfers"))
     assert not js("return document.querySelector('#outgoing-pair').open")
-    print("PASS: Send pairs an unpaired device with matching codes then automatically invites", flush=True)
+    print("PASS: tapping an unpaired device pairs with matching codes then automatically invites", flush=True)
     wait(lambda: (cli_received / "payload _img src=x onerror=alert(1)_.txt").exists())
     assert digest(source) == digest(cli_received / "payload _img src=x onerror=alert(1)_.txt")
     assert js("return [...document.querySelectorAll('#transfers progress')].some(p => p.value === 100)")
     print("PASS: injected chooser result, app-to-CLI send, 100% progress and SHA-256", flush=True)
 
     wait(lambda: "Paired" in text("#devices"))
-    click("#send")
+    click("#devices button:not(:disabled)")
     wait(lambda: js("return document.querySelectorAll('#transfers .transfer').length === 2"))
     assert not js("return document.querySelector('#outgoing-pair').open")
     wait(lambda: js("return [...document.querySelectorAll('.transfer-status')].filter(n => n.textContent === 'Complete').length === 2"))
-    print("PASS: already paired target sends again without a code prompt", flush=True)
+    print("PASS: tapping an already paired target sends again without a code prompt", flush=True)
 
     incoming_target = next(iter(json.loads((cli_dir / "trust.json").read_text())))
     incoming = root / "from-cli.txt"; incoming.write_bytes(b"CLI to desktop\n" * 8192)
@@ -158,7 +166,8 @@ def main(root):
     wait(lambda: (app_received / incoming.name).exists())
     assert digest(incoming) == digest(app_received / incoming.name)
     wait(lambda: js("return [...document.querySelectorAll('.transfer-status')].filter(n => n.textContent === 'Complete').length >= 3"))
-    print("PASS: CLI-to-app invitation, in-app acceptance, completion and SHA-256", flush=True)
+    wait(lambda: str(app_received / incoming.name) in text("#transfers .saved-location"))
+    print("PASS: CLI-to-app acceptance, SHA-256 and saved-location display", flush=True)
 
     rejected = root / "rejected.txt"; rejected.write_text("must not arrive")
     rejecting = launch([cli, "--state-dir", str(cli_dir), "send", incoming_target, str(rejected)], stdout=send_log, stderr=send_log)

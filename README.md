@@ -39,6 +39,12 @@ peer. Firewall rules must permit the configured TCP port and UDP 5353 for mDNS.
 
 ## Configuration
 
+Desktop and CLI receives default to the system **Downloads** folder (Linux XDG,
+Windows or macOS). If no Downloads setting exists, `home/Downloads` is used.
+The launch directory does not affect this default. An explicit `receive_directory`
+takes priority; relative configured paths resolve beside the loaded `config.toml`,
+including with `--config` and `--state-dir`.
+
 `directories` selects the platform config directory: typically
 `~/.config/meshdrop` on Linux, `%APPDATA%\meshdrop` on Windows, and
 `~/Library/Application Support/org.meshdrop.meshdrop` on macOS. Use
@@ -46,7 +52,8 @@ peer. Firewall rules must permit the configured TCP port and UDP 5353 for mDNS.
 and invalid values report the configuration filename.
 
 ```toml
-receive_directory = "received"
+# Optional: relative paths resolve beside this config.toml
+receive_directory = "incoming"
 port = 9843
 allowed_networks = ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "100.64.0.0/10", "169.254.0.0/16", "127.0.0.0/8", "::1/128", "fc00::/7", "fe80::/10"]
 providers = ["mdns", "manual", "peer-list"]
@@ -134,19 +141,20 @@ closing it cancels reception and withdraws discovery. Use `MESHDROP_STATE_DIR` t
 select an isolated profile; otherwise the CLI and app share the platform config
 folder and cannot bind the same port simultaneously.
 
-The shared desktop/Android main page has three steps: **Search devices**, **Choose
-files**, and **Send and wait for results**. Search starts automatically; **Search
+The shared desktop/Android main page shows **Devices**, **Files** and **Transfers**. Search starts automatically; **Search
 again** refreshes it. Only reachable devices with a successful meshdrop certificate
 probe appear. Failed probes, unresolved addresses and offline/non-meshdrop
 Tailscale peers appear only in **More → diagnostics**. Discovery never grants trust.
 
-Select one or more devices and files, then press **Send to selected devices**.
+**Tap a device to send immediately.** With no files selected, the chooser opens
+first and sending continues after selection. Tap other devices in sequence to
+start independent transfers; each has its own status and cancellation.
 For an unpaired device, compare the six-digit code on both devices and confirm on
 both sides; the file invitation follows automatically. Paired devices skip that
 prompt. Changed fingerprints are refused. Each target shows waiting, progress,
 completion, rejection, timeout or failure; active transfers have **Cancel**.
 Incoming pairing and file invitations open modal dialogs and require a decision.
-Device names and filenames render as text.
+Completed receives show each file’s saved location. Device names and filenames render as text.
 
 **More** contains local identity/QR, manual addresses, diagnostics, settings/TOML
 and the receive folder. Android also keeps QR scanning, received files/sharing and
@@ -173,12 +181,23 @@ using the development command above, then install the generated debug APK with
 `adb install -r PATH_TO_DEBUG_APK`, or open it on your device and explicitly allow
 installation from that source. Only Gradle's automatic debug key is used.
 
-Received files land in app-private storage without broad storage permission;
-uninstalling the app deletes that storage. Use **More → Refresh received files → Share** to hand a completed file to Android's
-native share chooser without adb. Only that one receive directory is exposed
-through FileProvider, with a temporary read grant. Partial files and paths outside
-it cannot be shared. Android document selection imports SAF URIs into private
-send-cache files using bounded buffers; no broad storage permission is requested.
+On **Android 10+ (API 29+)**, verified files are streamed into the public
+**Download** collection through MediaStore. Pending entries stay hidden until the
+copy finishes and are deleted on copy failure. New entries and collision renaming
+preserve existing files. No broad storage permission is requested. The completion
+view shows the Download name and content URI. A verified private copy is retained
+for the received-files list; **More → Refresh received files → Share** shares the
+public entry with a temporary read grant.
+
+On **Android 9 and below**, receives remain in app-private storage; uninstalling
+the app deletes them. Sharing exposes only completed receive files through
+FileProvider, never partial files or private identities.
+
+Select one or multiple files in another app’s **Share** menu and choose
+**meshdrop**. Cold starts and an already-open app import those content URIs into
+private send-cache files, then open the device-pick page with files selected.
+The document chooser and share target both copy in bounded buffers (at most 128
+files per import), never loading whole files into memory.
 
 On Android 13+, allow notification permission when requested. Denying it is shown
 in the app; incoming invitations still require explicit acceptance. Background
@@ -188,12 +207,12 @@ multicast lock. The notification toggle controls invitation alerts; the foregrou
 service notification is required while receiving. Stop releases the lock, cancels transfers and closes the listener.
 Android 15+ may limit dataSync background runtime; after the system stops it,
 reopen the app to start receiving again. Doze and OEM policies need real-device
-acceptance. The host and pinned-container runners each pass all nine runtime
-scenarios with swangle; see `tests/android/README.md`.
+acceptance. The emulator runner covers sharing, public Downloads and real bidirectional transfers
+with swangle; see `tests/android/README.md`.
 **Scan pairing QR** requests camera permission and accepts meshdrop QR content.
 A rejected camera permission leaves manual host:port / pasted QR input available.
 Scanning only adds a candidate; pairing still requires matching codes and explicit
 confirmation on both devices. Camera optics require real-phone acceptance.
 Tailscale enumeration and desktop folder opening are unavailable on Android;
-use a manual private VPN address instead. The default private receive directory is `files/meshdrop/received` inside the app
-data directory. Keep this destination to use the built-in sharing list.
+use a manual private VPN address instead. Android stages verified files in `files/meshdrop/received` inside the app
+data directory before publication; its receive-folder setting is read-only.

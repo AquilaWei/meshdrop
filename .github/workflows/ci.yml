@@ -38,3 +38,5 @@ jobs:
       - name: Build Android debug APK
         working-directory: crates/meshdrop-app
         run: NDK_HOME="$ANDROID_HOME/ndk/28.2.13676358" cargo tauri android build --debug --target aarch64
+      - name: Android storage and naming unit tests
+        run: crates/meshdrop-app/gen/android/gradlew -p crates/meshdrop-app/gen/android :app:testUniversalDebugUnitTest

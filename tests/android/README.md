@@ -24,13 +24,19 @@ emulator port 5580 and host ports 19843, 19844 and 19222; run one instance at a 
 The emulator's NAT does not carry host multicast. Pairing uses explicit addresses:
 `10.0.2.2:19844` reaches the host receiver; `adb forward tcp:19843 tcp:9843` exposes
 the Android receiver to the host CLI. Android app interaction uses debug WebView
-CDP; bytes are checked separately using SHA-256. Test source selection supplies a
-path through the existing command, as the desktop WebDriver suite does; actual
-SAF chooser interaction remains a native acceptance item.
+CDP; bytes are checked separately using SHA-256. The emulator-only `share-fixture` APK provides read-granted content URIs from a
+separate application. `am start -a android.intent.action.SEND` and
+`SEND_MULTIPLE` enter its sender activity with a content URI; it constructs the
+standard Parcelable stream extras and forwards to meshdrop through its share
+filter. This adapter is needed because `am` cannot create `ArrayList<Uri>` extras.
+The first share cold-starts meshdrop; the multiple share exercises `onNewIntent`.
+Both imports transfer to Linux and are checked byte-for-byte. Actual gallery/SAF
+chooser presentation remains a physical acceptance item.
 
 Scenarios cover foreground-service existence, explicitly accepted pairing,
-Linux-to-Android acceptance/hash, a FileProvider share chooser, Android-to-Linux
-hash, rejection without stored content, Home/background reception without automatic
+Linux-to-Android acceptance/hash and public MediaStore Download publication,
+collision preservation, received-file sharing, Android-to-Linux shared-intent
+hashes, rejection without stored content, Home/background reception without automatic
 acceptance, and stopping reception. The runner prints logcat (or the emulator log
 if ADB is unavailable) on failure, exits nonzero and terminates its child processes.
 Notification appearance, real Wi-Fi mDNS, camera optics, Doze and manufacturer
@@ -53,7 +59,7 @@ The successful run also exposed and verified a fix for an already-granted
 notification permission leaving the native permission request unresolved.
 No additional webview notification capability is granted.
 
-For a stock Debian container fallback, first build the debug APK using the host
+For a stock Debian container fallback, first build the debug APK and `share-fixture` APK using the host
 runner prerequisites, then run:
 
 ```sh
@@ -87,3 +93,15 @@ run six activity/focus parser tests. Runtime checks wait for initial boot broadc
 to settle, then require the share chooser to be both resumed and focused before
 sending Back. They require MainActivity to regain focus with the same process ID
 and the original CDP connection; crashes are not hidden by relaunching the app.
+
+The sender fixture is test-only and is installed only on the fresh emulator. It
+has no broad storage permission and is never installed on the physical phone.
+Build it independently with:
+
+```sh
+crates/meshdrop-app/gen/android/gradlew -p tests/android/share-fixture assembleDebug
+```
+
+API 29+ public output is checked through `/sdcard/Download`, with saved-location
+text in the shared frontend and a second same-name receive preserving both hashes.
+JVM tests cover flat names, path traversal, control characters and collision suffixes.

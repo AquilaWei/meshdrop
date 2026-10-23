@@ -3,6 +3,7 @@ package org.meshdrop.desktop
 import android.app.Activity
 import android.content.*
 import android.os.Build
+import android.net.Uri
 import android.provider.OpenableColumns
 import androidx.activity.result.ActivityResult
 import androidx.core.content.ContextCompat
@@ -50,13 +51,28 @@ class ReceiverPlugin(private val activity: Activity) : Plugin(activity) {
         try {
             val name = invoke.parseArgs(FileArgs::class.java).name
             val file = ReceivedFiles.completed(received(), name)
-            val uri = FileProvider.getUriForFile(activity, "${activity.packageName}.fileprovider", file)
+            val uri = Downloads(activity).uri(name) ?: FileProvider.getUriForFile(activity, "${activity.packageName}.fileprovider", file)
             val send = Intent(Intent.ACTION_SEND).setType("application/octet-stream")
                 .putExtra(Intent.EXTRA_STREAM, uri).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             send.clipData = ClipData.newRawUri(file.name, uri)
             activity.startActivity(Intent.createChooser(send, "Share received file"))
             invoke.resolve()
         } catch (error: Exception) { invoke.reject("Cannot share received file: $error") }
+    }
+    @Command
+    fun publish(invoke: Invoke) {
+        Thread {
+            try {
+                val source = ReceivedFiles.completed(received(), invoke.parseArgs(FileArgs::class.java).name)
+                invoke.resolve(JSObject().put("location", Downloads(activity).publish(source)))
+            } catch (error: Exception) { invoke.reject("Cannot publish verified receive: $error") }
+        }.start()
+    }
+    @Command
+    fun shared(invoke: Invoke) {
+        val intent = (activity as MainActivity).takeShare()
+        if (intent == null) { invoke.resolve(JSObject().put("paths", JSArray())); return }
+        importDocuments(invoke, intent, true)
     }
     @Command
     fun pick(invoke: Invoke) {
@@ -67,16 +83,31 @@ class ReceiverPlugin(private val activity: Activity) : Plugin(activity) {
     @ActivityCallback
     fun picked(invoke: Invoke, result: ActivityResult) {
         if (result.resultCode != Activity.RESULT_OK) { invoke.resolve(JSObject().put("paths", JSArray())); return }
+        importDocuments(invoke, result.data, false)
+    }
+    @Suppress("DEPRECATION")
+    private fun importDocuments(invoke: Invoke, data: Intent?, shared: Boolean) {
         // Copy on an IO thread in bounded buffers: SAF URIs are not filesystem paths.
         Thread {
             val imported = mutableListOf<File>()
             try {
-                val data = result.data ?: error("No document returned")
-                val uris = data.clipData?.let { clip -> (0 until clip.itemCount).map { clip.getItemAt(it).uri } } ?: listOfNotNull(data.data)
+                requireNotNull(data) { "No document returned" }
+                val uris = if (shared && data.action == Intent.ACTION_SEND_MULTIPLE) {
+                    data.getParcelableArrayListExtra<Uri>(Intent.EXTRA_STREAM)?.toList() ?: emptyList()
+                } else if (shared) {
+                    listOfNotNull(data.getParcelableExtra<Uri>(Intent.EXTRA_STREAM))
+                } else {
+                    data.clipData?.let { clip -> (0 until clip.itemCount).map { clip.getItemAt(it).uri } } ?: listOfNotNull(data.data)
+                }
+                require(uris.size <= 128) { "Choose at most 128 documents at once" }
+                require(uris.all { it.scheme == "content" }) { "Only content URIs can be imported" }
+                val names = mutableSetOf<String>()
                 val paths = uris.map { uri ->
                     val directory = File(activity.cacheDir, "send-${UUID.randomUUID()}").apply { mkdirs() }
                     val display = activity.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor -> if (cursor.moveToFirst()) cursor.getString(0) else null } ?: "document"
-                    val name = display.substringAfterLast('/').substringAfterLast('\\').replace(Regex("[\\p{Cntrl}]"), "_").takeIf { it != "." && it != ".." && it.isNotBlank() } ?: "document"
+                    var index = 0
+                    var name: String
+                    do { name = DownloadNames.candidate(display, index++) } while (!names.add(name))
                     val destination = File(directory, name); imported.add(destination)
                     activity.contentResolver.openInputStream(uri).use { input ->
                         requireNotNull(input) { "Cannot read selected document" }

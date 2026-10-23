@@ -12,4 +12,5 @@ TRACE
   export MESHDROP_EMULATOR=/tmp/emulator-trace
   trap 'grep -E "PROT_EXEC|SIGSEGV|EPERM|EACCES|EINVAL" /tmp/emulator-syscalls.log | tail -300' EXIT
 fi
+export MESHDROP_SHARE_FIXTURE=/workspace/share-fixture.apk
 python3 -m unittest discover -s tests/android -p 'test_*.py' && cargo build -p meshdrop-cli --locked && python3 tests/android/scenario.py

@@ -16,4 +16,4 @@ fi
 # Reserve the fixed NAT/CDP ports for this runner, never a user's existing AVD.
 exec 9>"/tmp/meshdrop-android-${UID}.lock"
 flock -n 9 || { echo 'Another meshdrop Android runner is active.' >&2; exit 1; }
-python3 -m unittest discover -s tests/android -p 'test_*.py' && cargo build -p meshdrop-cli --locked && (cd crates/meshdrop-app && cargo tauri android build --debug --target x86_64) && crates/meshdrop-app/gen/android/gradlew -p crates/meshdrop-app/gen/android :app:testUniversalDebugUnitTest && python3 tests/android/check_apk.py && python3 tests/android/scenario.py
+python3 -m unittest discover -s tests/android -p 'test_*.py' && cargo build -p meshdrop-cli --locked && (cd crates/meshdrop-app && cargo tauri android build --debug --target x86_64) && crates/meshdrop-app/gen/android/gradlew -p crates/meshdrop-app/gen/android :app:testUniversalDebugUnitTest && crates/meshdrop-app/gen/android/gradlew -p tests/android/share-fixture assembleDebug && python3 tests/android/check_apk.py && python3 tests/android/scenario.py
