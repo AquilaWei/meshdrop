@@ -519,6 +519,7 @@ impl Session {
             }
             "refresh" => {
                 let mut providers: Vec<Box<dyn DiscoveryProvider>> = Vec::new();
+                let pairing_inputs = manual.clone();
                 let mut addresses = manual;
                 addresses.extend(trust.0.keys().cloned());
                 // Explicit addresses remain usable even when optional providers are disabled.
@@ -550,10 +551,15 @@ impl Session {
                     }
                 }
                 let report = discovery::discover(&providers).await;
+                let mut hidden_problems = Vec::new();
                 let devices = report
                     .devices
                     .into_iter()
                     .filter(|device| {
+                        if !device.online || device.fingerprint.is_none() {
+                            hidden_problems.push(json!({"provider":"probe", "error":format!("{}: offline or meshdrop probe failed", device.addresses.join(", "))}));
+                            return false;
+                        }
                         device.fingerprint.as_deref() != Some(&self.identity.fingerprint())
                     })
                     .map(|device| {
@@ -576,7 +582,13 @@ impl Session {
                         });
                         let mut value = serde_json::to_value(device).expect("device serialization");
                         value["paired"] = json!(target.is_some());
-                        value["target"] = json!(target);
+                        value["target"] = json!(target.or_else(|| value["addresses"][0].as_str().map(str::to_owned)));
+                        // Keep an explicitly scanned QR pin until the Send pairing step.
+                        value["pairing_address"] = json!(pairing_inputs.iter().find(|input| {
+                            discovery::parse_address(input).is_ok_and(|(address, pin)| {
+                                pin.is_some() && value["addresses"].as_array().is_some_and(|items| items.contains(&json!(address)))
+                            })
+                        }).cloned().unwrap_or_else(|| value["target"].as_str().unwrap_or_default().to_owned()));
                         value["mismatch"] = json!(mismatch);
                         value
                     })
@@ -586,6 +598,7 @@ impl Session {
                     .context("problems array")?
                     .clone();
                 problems.extend(setup_problems);
+                problems.extend(hidden_problems);
                 Ok(json!({"devices":devices,"problems":problems}))
             }
             "prepare_pair" => {
@@ -961,6 +974,55 @@ mod tests {
         wait_status(&first, "cancelled").await;
         first.shutdown().await;
         second.shutdown().await;
+    }
+    #[tokio::test]
+    async fn discovery_hides_unresolved_candidates_in_diagnostics() {
+        let (_a, first, _notices) = profile("First", "[]").await;
+        first
+            .call("add_device", json!({"address":"127.0.0.1:1"}))
+            .await
+            .unwrap();
+        let report = first.call("refresh", Value::Null).await.unwrap();
+        assert_eq!(report["devices"], json!([]));
+        assert!(report["problems"].to_string().contains("127.0.0.1:1"));
+        first.shutdown().await;
+    }
+    #[tokio::test]
+    async fn discovery_preserves_explicit_qr_pin_for_send_pairing() {
+        let (_a, first, _notices_a) = profile("First", "[]").await;
+        let (_b, second, _notices_b) = profile("Second", "[]").await;
+        let snapshot = second.call("snapshot", Value::Null).await.unwrap();
+        let qr = meshdrop_core::discovery::qr(
+            &address(&second).await,
+            snapshot["fingerprint"].as_str().unwrap(),
+        );
+        first
+            .call("add_device", json!({"address":qr}))
+            .await
+            .unwrap();
+        let report = first.call("refresh", Value::Null).await.unwrap();
+        assert_eq!(report["devices"][0]["pairing_address"], qr);
+        assert_eq!(report["devices"][0]["paired"], false);
+        first.shutdown().await;
+        second.shutdown().await;
+    }
+    #[tokio::test]
+    async fn discovery_hides_non_meshdrop_tcp_listener() {
+        let (_a, first, _notices) = profile("First", "[]").await;
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap().to_string();
+        let accepting = tokio::spawn(async move {
+            drop(listener.accept().await.unwrap());
+        });
+        first
+            .call("add_device", json!({"address":address}))
+            .await
+            .unwrap();
+        let report = first.call("refresh", Value::Null).await.unwrap();
+        assert_eq!(report["devices"], json!([]));
+        assert!(report["problems"].to_string().contains(&address));
+        accepting.await.unwrap();
+        first.shutdown().await;
     }
     #[tokio::test]
     async fn discovery_retains_device_when_optional_provider_reports_problem() {

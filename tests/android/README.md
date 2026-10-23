@@ -80,3 +80,6 @@ runs strace for mmap/mprotect/munmap and prints relevant executable mappings and
 faults on exit. On both runners this flag also enables emulator `-verbose` and
 `-debug-init`; these diagnosis flags are disabled by default. Failure output includes logcat,
 Android exit information and the emulator log when ADB is unavailable.
+
+The shared UI scenario opens More for received-file sharing and stopping reception,
+and asserts an unresolved address appears only in diagnostics.

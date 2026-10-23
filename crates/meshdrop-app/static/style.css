@@ -3,3 +3,5 @@
 #settings-form{display:grid;grid-template-columns:1fr 1fr;gap:12px;align-items:center}#settings-form fieldset{grid-column:1 / -1}#settings-form textarea{min-height:110px}#setting-folder{width:100%}.transfer{padding:12px 0;border-top:1px solid #e2ebef}
 
 @media(max-width:600px){header,main,footer{padding:12px}.eyebrow{letter-spacing:0}section{padding:16px}.identity{grid-template-columns:1fr;gap:12px}.device{flex-wrap:wrap}.input-row{flex-wrap:wrap}.input-row input{min-width:180px}#settings-form{grid-template-columns:1fr}.code{font-size:32px}button{min-height:44px}canvas{max-width:100%}}
+
+nav{margin-bottom:18px}dialog{color:inherit;border:1px solid #bacdd7;border-radius:14px;padding:24px;width:min(540px,calc(100% - 24px));max-height:85vh;overflow:auto}dialog::backdrop{background:#152d3d99}

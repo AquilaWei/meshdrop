@@ -146,6 +146,7 @@ with tempfile.TemporaryDirectory(prefix='meshdrop-android-') as temporary:
         content = adb('exec-out','run-as',PACKAGE,'cat','files/meshdrop/received/'+source.name)
         assert hashlib.sha256(content).digest() == hashlib.sha256(source.read_bytes()).digest()
         print('PASS: accepted Linux-to-Android content matches SHA-256', flush=True)
+        cdp.click('#show-more')
         cdp.click('#received-refresh')
         wait(lambda: source.name in cdp.text('#received-files'))
         cdp.click('#received-files button')
@@ -154,7 +155,12 @@ with tempfile.TemporaryDirectory(prefix='meshdrop-android-') as temporary:
         print('PASS: received content can be shared without adb access', flush=True)
         cdp.call('add_device', {'address':'10.0.2.2:19844'}); cdp.call('refresh'); cdp.evaluate('poll()')
         wait(lambda: 'Paired' in cdp.text('#devices'))
+        cdp.call('add_device', {'address':'127.0.0.1:1'}); cdp.call('refresh'); cdp.evaluate('poll()')
+        wait(lambda: '127.0.0.1:1' in cdp.text('#problems'))
+        assert '127.0.0.1:1' not in cdp.text('#devices')
+        print('PASS: unresolved candidate stays in More diagnostics', flush=True)
         cdp.call('select_files', ['/data/user/0/'+PACKAGE+'/files/meshdrop/received/'+source.name])
+        cdp.click('#show-send')
         cdp.click('#devices input[type=checkbox]'); cdp.click('#send')
         wait(lambda: (received/source.name).exists())
         assert hashlib.sha256((received/source.name).read_bytes()).digest() == hashlib.sha256(source.read_bytes()).digest()
@@ -174,10 +180,11 @@ with tempfile.TemporaryDirectory(prefix='meshdrop-android-') as temporary:
         adb('shell','am','start','-n',PACKAGE+'/.MainActivity'); cdp.click('#invitations [data-action=reject]')
         assert sender.wait(timeout=30) != 0
         print('PASS: background reception retains explicit user decision', flush=True)
+        cdp.click('#show-more')
         cdp.click('#stop-receiver')
         wait(lambda: 'isForeground=true' not in adb('shell','dumpsys','activity','services',PACKAGE).decode())
         print('PASS: stop receiving action stops foreground service', flush=True)
-        print('8 Android scenarios passed; 0 failed', flush=True)
+        print('9 Android scenarios passed; 0 failed', flush=True)
     except Exception:
         try:
             print(adb('logcat','-b','crash','-d').decode(errors='replace'), flush=True)

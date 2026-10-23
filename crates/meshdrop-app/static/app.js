@@ -3,6 +3,9 @@ const request = (operation, payload = null) => window.__TAURI__.core.invoke('des
 const $ = selector => document.querySelector(selector);
 const selected = new Set();
 let pairing = null;
+let currentDevices = [];
+let sendQueue = [];
+let sending = false;
 let refreshing = false;
 let androidStarted = false;
 let lastDevices = '';
@@ -37,11 +40,15 @@ async function preparePair(address) {
     $('#pair-name').textContent = pairing.name;
     $('#pair-code').textContent = pairing.code;
     $('#pair-status').textContent = '';
-    $('#outgoing-pair').hidden = false;
+    $('#outgoing-pair').showModal();
     $('#pair-confirm').disabled = false;
-  } catch (_) { /* The command error remains visible until the next action. */ }
+  } catch (_) { sendQueue = []; finishSending(); }
 }
 function devices(items) {
+  currentDevices = items;
+  for (const target of selected) {
+    if (!items.some(device => device.target === target)) selected.delete(target);
+  }
   const signature = JSON.stringify(items);
   if (signature === lastDevices) return;
   lastDevices = signature;
@@ -49,18 +56,16 @@ function devices(items) {
   for (const device of items) {
     const row = element('div', undefined, 'device');
     const checkbox = element('input');
-    checkbox.type = 'checkbox'; checkbox.disabled = !device.paired || !device.online;
+    checkbox.type = 'checkbox'; checkbox.disabled = !device.online || device.mismatch;
     checkbox.checked = selected.has(device.target); checkbox.setAttribute('aria-label', `Select ${device.name}`);
     checkbox.addEventListener('change', () => checkbox.checked ? selected.add(device.target) : selected.delete(device.target));
     const description = element('div', undefined, 'description');
     description.append(element('strong', device.name), element('small', `${device.platform} · ${device.online ? 'Online' : 'Offline'} · ${device.paired ? 'Paired' : 'Unpaired'}`), element('small', device.addresses.join(', ')));
     row.append(checkbox, description);
-    const button = element('button', device.mismatch ? 'Fingerprint mismatch' : 'Pair');
-    button.disabled = device.paired || !device.online;
-    button.addEventListener('click', () => preparePair(device.addresses[0]));
-    row.append(button); $('#devices').append(row);
+    if (device.mismatch) row.append(element('strong', 'Fingerprint mismatch'));
+    $('#devices').append(row);
   }
-  if (!items.length) $('#devices').append(element('p', 'No devices yet. Refresh or add an address.'));
+  if (!items.length) $('#devices').append(element('p', 'No confirmed meshdrop devices yet. Search again or add an address in More.'));
 }
 function invitations(items) {
   const signature = JSON.stringify(items);
@@ -82,6 +87,9 @@ function invitations(items) {
     }
     $('#invitations').append(box);
   }
+  const dialog = $('#incoming-dialog');
+  if (items.length && !dialog.open) dialog.showModal();
+  if (!items.length && dialog.open) dialog.close();
 }
 let lastTransfers = '';
 function transfers(items) {
@@ -91,7 +99,7 @@ function transfers(items) {
   for (const transfer of items) {
     const box = element('div', undefined, 'transfer'); box.dataset.id = transfer.id;
     box.append(element('h3', `${transfer.direction === 'send' ? 'Sending to' : 'Receiving from'} ${transfer.peer}`));
-    const status = element('p', transfer.status.replaceAll('_',' '), 'transfer-status'); box.append(status);
+    const status = element('p', ({waiting:'Waiting for acceptance', accepted:'Transferring', complete:'Complete', rejected:'Rejected', timed_out:'Timed out', failed:'Failed', cancelled:'Cancelled'}[transfer.status] || transfer.status), 'transfer-status'); box.append(status);
     for (const file of transfer.files) {
       const percent = file.status === 'complete' ? 100 : file.total ? Math.floor(100*file.bytes/file.total) : 0;
       box.append(element('p', `${file.name} · ${percent}% · ${file.bytes}/${file.total} bytes`));
@@ -140,16 +148,54 @@ $('#manual').addEventListener('submit', async event => {
   try { await act('add_device', {address:$('#address').value}); $('#address').value = ''; await refresh(); } catch (_) { /* rendered */ }
 });
 $('#refresh').addEventListener('click', refresh);
-$('#pair-dismiss').addEventListener('click', () => { pairing = null; $('#outgoing-pair').hidden = true; });
+function finishSending() {
+  sending = false;
+  $('#send').disabled = false;
+}
+function cancelPairing() {
+  pairing = null; sendQueue = []; $('#outgoing-pair').close(); finishSending();
+}
+$('#pair-dismiss').addEventListener('click', cancelPairing);
+$('#outgoing-pair').addEventListener('cancel', event => { event.preventDefault(); cancelPairing(); });
+$('#incoming-dialog').addEventListener('cancel', event => event.preventDefault());
+async function nextTarget() {
+  const device = sendQueue.shift();
+  if (!device) { finishSending(); return; }
+  if (!device.paired) { await preparePair(device.pairing_address || device.target); return; }
+  try { await act('send', {targets:[device.target]}); }
+  catch (_) { /* Keep independent targets moving after a command failure. */ }
+  await poll(); await nextTarget();
+}
+
 $('#pair-confirm').addEventListener('click', async () => {
   $('#pair-confirm').disabled = true; $('#pair-status').textContent = 'Waiting for the other device to accept…';
-  try { await act('confirm_pair', pairing); $('#pair-status').textContent = 'Paired'; await refresh(); }
-  catch (_) { $('#pair-status').textContent = 'Pairing failed'; }
+  try {
+    const confirmed = pairing;
+    const target = confirmed.address;
+    await act('confirm_pair', confirmed);
+    if (pairing !== confirmed) return;
+    $('#outgoing-pair').close(); pairing = null;
+    await act('send', {targets:[target]});
+    await refresh(); await nextTarget();
+  } catch (_) { $('#pair-status').textContent = 'Pairing or sending failed. Cancel to return.'; sendQueue = []; finishSending(); }
 });
 poll(); refresh(); setInterval(poll, 300); setInterval(refresh, 8000);
 
 $('#pick-files').addEventListener('click', async () => { try { await act('pick_files'); await poll(); } catch (_) { /* rendered */ } });
-$('#send').addEventListener('click', async () => { try { await act('send',{targets:[...selected]}); await poll(); } catch (_) { /* rendered */ } });
+$('#send').addEventListener('click', async () => {
+  if (sending) return;
+  if (!selected.size) { failure('Select at least one device.'); return; }
+  if ($('#selected-files').textContent === 'No files selected') { failure('Choose files first.'); return; }
+  sending = true; $('#send').disabled = true;
+  sendQueue = currentDevices.filter(device => selected.has(device.target));
+  await nextTarget();
+});
+function showPage(more) {
+  $('#send-page').hidden = more;
+  $('#more-page').hidden = !more;
+}
+$('#show-send').addEventListener('click', () => showPage(false));
+$('#show-more').addEventListener('click', () => showPage(true));
 $('#open-folder').addEventListener('click', async () => { try { await act('open_receive_directory'); } catch (_) { /* rendered */ } });
 
 let settings = null;
@@ -205,6 +251,6 @@ $('#scan-qr').addEventListener('click', async () => {
     const result = await window.__TAURI__.core.invoke('plugin:barcode-scanner|scan',{formats:['QR_CODE'],windowed:false});
     if (!result.content || !result.content.startsWith('meshdrop://')) throw new Error('This is not a meshdrop pairing QR. Enter an address manually.');
     await act('add_device',{address:result.content}); await refresh();
-    await preparePair(result.content);
+    showPage(false);
   } catch (error) { failure(error); }
 });

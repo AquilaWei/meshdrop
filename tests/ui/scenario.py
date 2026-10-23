@@ -92,7 +92,7 @@ def main(root):
     app_received = config(app_dir, "Desktop under test", 19843)
     cli = str(Path("target/debug/meshdrop").resolve())
     cli_log = open(root / "cli.log", "w+")
-    launch([cli, "--state-dir", str(cli_dir), "receive", "--auto-accept"], stdin=subprocess.PIPE, stdout=cli_log, stderr=cli_log)
+    receiver = launch([cli, "--state-dir", str(cli_dir), "receive", "--auto-accept"], stdin=subprocess.PIPE, stdout=cli_log, stderr=cli_log)
     wait(lambda: port_open(19844))
     driver_log = open(root / "driver.log", "w+")
     env = dict(os.environ, MESHDROP_STATE_DIR=str(app_dir))
@@ -105,18 +105,14 @@ def main(root):
     assert "meshdrop://" in text("#qr-content")
     print("PASS: app background receiver, mDNS device list and own QR", flush=True)
 
-    pair_log = open(root / "pair.log", "w+")
-    pairing = launch([cli, "--state-dir", str(cli_dir), "pair", "127.0.0.1:19843", "--advertise", "127.0.0.1:19844"], stdin=subprocess.PIPE, stdout=pair_log, stderr=pair_log)
-    pairing.stdin.write(b"y\n"); pairing.stdin.flush()
-    wait(lambda: bool(js("return document.querySelector('#invitations [data-action=accept]')")))
-    code = text("#invitations .code")
-    assert re.fullmatch(r"\d{6}", code)
-    pair_log.flush(); assert code in (root / "pair.log").read_text()
-    click("#invitations [data-action=accept]")
-    assert pairing.wait(timeout=20) == 0
-    click("#refresh")
-    wait(lambda: "Paired" in text("#devices"))
-    print("PASS: CLI pairing requires matching code and in-app acceptance", flush=True)
+    assert js("return document.querySelector('#more-page').hidden")
+    click("#show-more")
+    fill("#address", "127.0.0.1:1")
+    click("#manual button")
+    wait(lambda: "127.0.0.1:1" in text("#problems"))
+    assert "127.0.0.1:1" not in text("#devices")
+    click("#show-send")
+    print("PASS: unresolved/non-meshdrop candidate is diagnostic only", flush=True)
 
     # WebDriver controls the webview, not native GTK chooser windows. Inject only
     # the chooser's result through the same existing Rust command used by the
@@ -131,25 +127,41 @@ def main(root):
     assert "error" not in selection, selection
     wait(lambda: source.name in text("#selected-files"))
     click("#send")
-    wait(lambda: "complete" in text("#transfers"))
+    wait(lambda: js("return document.querySelector('#outgoing-pair').open"))
+    code = text("#pair-code")
+    assert re.fullmatch(r"\d{6}", code)
+    click("#pair-confirm")
+    wait(lambda: code in (root / "cli.log").read_text())
+    receiver.stdin.write(b"y\n"); receiver.stdin.flush()
+    wait(lambda: "Complete" in text("#transfers"))
+    assert not js("return document.querySelector('#outgoing-pair').open")
+    print("PASS: Send pairs an unpaired device with matching codes then automatically invites", flush=True)
     wait(lambda: (cli_received / "payload _img src=x onerror=alert(1)_.txt").exists())
     assert digest(source) == digest(cli_received / "payload _img src=x onerror=alert(1)_.txt")
     assert js("return [...document.querySelectorAll('#transfers progress')].some(p => p.value === 100)")
     print("PASS: injected chooser result, app-to-CLI send, 100% progress and SHA-256", flush=True)
 
+    wait(lambda: "Paired" in text("#devices"))
+    click("#send")
+    wait(lambda: js("return document.querySelectorAll('#transfers .transfer').length === 2"))
+    assert not js("return document.querySelector('#outgoing-pair').open")
+    wait(lambda: js("return [...document.querySelectorAll('.transfer-status')].filter(n => n.textContent === 'Complete').length === 2"))
+    print("PASS: already paired target sends again without a code prompt", flush=True)
+
+    incoming_target = next(iter(json.loads((cli_dir / "trust.json").read_text())))
     incoming = root / "from-cli.txt"; incoming.write_bytes(b"CLI to desktop\n" * 8192)
     send_log = open(root / "send.log", "w+")
-    sending = launch([cli, "--state-dir", str(cli_dir), "send", "127.0.0.1:19843", str(incoming)], stdout=send_log, stderr=send_log)
+    sending = launch([cli, "--state-dir", str(cli_dir), "send", incoming_target, str(incoming)], stdout=send_log, stderr=send_log)
     wait(lambda: incoming.name in text("#invitations"))
     click("#invitations [data-action=accept]")
     assert sending.wait(timeout=20) == 0
     wait(lambda: (app_received / incoming.name).exists())
     assert digest(incoming) == digest(app_received / incoming.name)
-    wait(lambda: js("return [...document.querySelectorAll('.transfer-status')].filter(n => n.textContent === 'complete').length >= 2"))
+    wait(lambda: js("return [...document.querySelectorAll('.transfer-status')].filter(n => n.textContent === 'Complete').length >= 3"))
     print("PASS: CLI-to-app invitation, in-app acceptance, completion and SHA-256", flush=True)
 
     rejected = root / "rejected.txt"; rejected.write_text("must not arrive")
-    rejecting = launch([cli, "--state-dir", str(cli_dir), "send", "127.0.0.1:19843", str(rejected)], stdout=send_log, stderr=send_log)
+    rejecting = launch([cli, "--state-dir", str(cli_dir), "send", incoming_target, str(rejected)], stdout=send_log, stderr=send_log)
     wait(lambda: rejected.name in text("#invitations"))
     click("#invitations [data-action=reject]")
     assert rejecting.wait(timeout=20) != 0
@@ -162,13 +174,14 @@ def main(root):
     assert source.name in text("#transfers")
     print("PASS: malicious device names and filenames display as text", flush=True)
 
+    click("#show-more")
     js("document.querySelector('#settings-toml').closest('details').open = true; return true")
     fill("#settings-toml", "prot = 1234")
     click("#save-toml")
     wait(lambda: "config.toml" in text("#error") and "prot" in text("#error"))
     assert "port = 19843" in (app_dir / "config.toml").read_text()
     print("PASS: invalid TOML reports path and preserves saved settings", flush=True)
-    print("7 UI scenarios passed; 0 failed", flush=True)
+    print("9 UI scenarios passed; 0 failed", flush=True)
 
 
 with tempfile.TemporaryDirectory(prefix="meshdrop-ui-") as folder:

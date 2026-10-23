@@ -134,10 +134,23 @@ closing it cancels reception and withdraws discovery. Use `MESHDROP_STATE_DIR` t
 select an isolated profile; otherwise the CLI and app share the platform config
 folder and cannot bind the same port simultaneously.
 
-The app displays provider diagnostics without hiding usable devices. Add an address
-or QR payload, compare six-digit codes on both devices, then explicitly accept the
-incoming pairing. Select paired devices and files to send; incoming file offers
-always require an in-app decision. Device names and filenames render as text.
+The shared desktop/Android main page has three steps: **Search devices**, **Choose
+files**, and **Send and wait for results**. Search starts automatically; **Search
+again** refreshes it. Only reachable devices with a successful meshdrop certificate
+probe appear. Failed probes, unresolved addresses and offline/non-meshdrop
+Tailscale peers appear only in **More → diagnostics**. Discovery never grants trust.
+
+Select one or more devices and files, then press **Send to selected devices**.
+For an unpaired device, compare the six-digit code on both devices and confirm on
+both sides; the file invitation follows automatically. Paired devices skip that
+prompt. Changed fingerprints are refused. Each target shows waiting, progress,
+completion, rejection, timeout or failure; active transfers have **Cancel**.
+Incoming pairing and file invitations open modal dialogs and require a decision.
+Device names and filenames render as text.
+
+**More** contains local identity/QR, manual addresses, diagnostics, settings/TOML
+and the receive folder. Android also keeps QR scanning, received files/sharing and
+Stop receiving here. Background Android notifications retain their existing behavior.
 Settings are saved atomically to the shared `config.toml`; unknown keys include the
 file path in the error. `notifications_enabled` toggles desktop notifications
 immediately. Restart after changing the receive folder, port, providers, networks
@@ -161,7 +174,7 @@ using the development command above, then install the generated debug APK with
 installation from that source. Only Gradle's automatic debug key is used.
 
 Received files land in app-private storage without broad storage permission;
-uninstalling the app deletes that storage. Use **Refresh received files → Share** to hand a completed file to Android's
+uninstalling the app deletes that storage. Use **More → Refresh received files → Share** to hand a completed file to Android's
 native share chooser without adb. Only that one receive directory is exposed
 through FileProvider, with a temporary read grant. Partial files and paths outside
 it cannot be shared. Android document selection imports SAF URIs into private
