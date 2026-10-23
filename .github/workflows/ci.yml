@@ -27,6 +27,9 @@ jobs:
           distribution: temurin
           java-version: '17'
       - uses: android-actions/setup-android@v3
+        with:
+          # Google removed the legacy tools package requested by v3 defaults.
+          packages: platform-tools
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-linux-android
