@@ -4,7 +4,7 @@
 <body>
 <header><div><span class="eyebrow">PRIVATE NETWORK · ENCRYPTED TRANSFERS</span><h1>meshdrop</h1></div><span id="service-state">Starting receiver…</span></header>
 <main>
-<section id="android-controls" hidden><h2>Android reception</h2><p id="android-permission" role="status"></p><button id="stop-receiver">Stop receiving</button><button id="scan-qr">Scan pairing QR</button><p>Manual addresses remain available when camera permission is denied.</p><h3>Received files</h3><button id="received-refresh">Refresh received files</button><div id="received-files"></div></section>
+<section id="android-controls" hidden><h2>Android reception</h2><p>Tailscale enumeration and opening receive folders are desktop-only. Use manual VPN addresses and Share below to access received files.</p><p id="android-permission" role="status"></p><button id="stop-receiver">Stop receiving</button><button id="scan-qr">Scan pairing QR</button><p>Manual addresses remain available when camera permission is denied.</p><h3>Received files</h3><button id="received-refresh">Refresh received files</button><div id="received-files"></div></section>
 <section class="identity"><div><h2>My device</h2><h3 id="my-name"></h3><label>Certificate fingerprint</label><p id="fingerprint" class="mono"></p><details><summary>QR content</summary><p id="qr-content" class="mono"></p></details></div><canvas id="qr" aria-label="Pairing QR code"></canvas></section>
 <div id="error" role="alert" hidden></div>
 <section id="fingerprint-error" role="alert" hidden><h2>Fingerprint mismatch</h2><p>The stored identity and the peer certificate differ. Connection refused. Verify the device locally before changing trust.</p></section>

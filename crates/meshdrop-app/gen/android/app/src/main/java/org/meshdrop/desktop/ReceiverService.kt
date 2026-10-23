@@ -21,7 +21,7 @@ class ReceiverService : Service() {
         if (intent?.action == "STOP") { stopSelf(); return START_NOT_STICKY }
         try {
             val manager = getSystemService(NotificationManager::class.java)
-            manager.createNotificationChannel(NotificationChannel("receiver", "Background reception", NotificationManager.IMPORTANCE_LOW))
+            if (Build.VERSION.SDK_INT >= 26) manager.createNotificationChannel(NotificationChannel("receiver", "Background reception", NotificationManager.IMPORTANCE_LOW))
             val open = PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
             val stop = PendingIntent.getService(this, 1, Intent(this, ReceiverService::class.java).setAction("STOP"), PendingIntent.FLAG_IMMUTABLE)
             val notification = NotificationCompat.Builder(this, "receiver")
