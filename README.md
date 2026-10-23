@@ -79,7 +79,7 @@ From `crates/meshdrop-app`, run `cargo tauri android build --debug --target aarc
 for a typical ARM64 phone, or use `--target x86_64` for the emulator. Install the
 Rust target for that ABI with `rustup target add aarch64-linux-android` or
 `rustup target add x86_64-linux-android`. The Android runner checks a debug APK and
-JVM unit tests; its tool requirements and known host SIGSEGV are recorded in
+JVM unit tests; its tool requirements, swangle renderer and container fallback are recorded in
 [tests/android/README.md](tests/android/README.md).
 No host system packages or release signing keys are installed by this project.
 
@@ -92,8 +92,10 @@ cargo test --workspace
 ./tests/docker/run.sh
 ./tests/wine/run.sh
 ./tests/ui/run.sh
-# Android KVM runtime check (host emulator crash currently blocks this):
+# Android KVM runtime check (Emulator 37.1.11, swangle):
 ./tests/android/run.sh
+# Optional pinned-emulator container fallback (after building the debug APK):
+./tests/android/container.sh
 ```
 
 Container scripts download images and build dependencies inside containers. Wine
@@ -103,7 +105,8 @@ The Windows suite runs core and CLI tests in Wine; Linux-only `/proc` VmHWM
 measurement is excluded by target configuration. Real Windows, macOS and multicast
 LAN behavior still need the [acceptance checklist](docs/acceptance.md). CI verifies
 fmt, clippy and tests on Ubuntu, Windows and macOS, plus an Android debug APK
-build job, after a future authorized push. Hosted jobs have not run.
+build job. All four hosted jobs have passed on the public
+[AquilaWei/meshdrop repository](https://github.com/AquilaWei/meshdrop).
 
 The Xvfb/WebDriver suite drives seven desktop scenarios against real CLI peers.
 Its chooser-result injection and native UI limits are documented in
@@ -111,7 +114,7 @@ Its chooser-result injection and native UI limits are documented in
 WebView2 UI execution requires native Windows.
 
 See [protocol](docs/protocol.md), [progress](progress.md), and
-[feature list](feature_list.json). Android runtime acceptance remains pending; iOS, Bluetooth and
+[feature list](feature_list.json). Android emulator interoperability passes; physical acceptance remains pending. iOS, Bluetooth and
 Taildrop compatibility are outside scope.
 
 ## Desktop app (Tauri 2)
@@ -172,13 +175,12 @@ multicast lock. The notification toggle controls invitation alerts; the foregrou
 service notification is required while receiving. Stop releases the lock, cancels transfers and closes the listener.
 Android 15+ may limit dataSync background runtime; after the system stops it,
 reopen the app to start receiving again. Doze and OEM policies need real-device
-acceptance. These native runtime flows are implemented but emulator verification
-may be blocked by a host emulator crash; see `tests/android/README.md`.
+acceptance. The host and pinned-container runners each pass all eight runtime
+scenarios with swangle; see `tests/android/README.md`.
 **Scan pairing QR** requests camera permission and accepts meshdrop QR content.
 A rejected camera permission leaves manual host:port / pasted QR input available.
 Scanning only adds a candidate; pairing still requires matching codes and explicit
-confirmation on both devices. Camera optics have not been tested in this host's
-crashing emulator.
+confirmation on both devices. Camera optics require real-phone acceptance.
 Tailscale enumeration and desktop folder opening are unavailable on Android;
 use a manual private VPN address instead. The default private receive directory is `files/meshdrop/received` inside the app
 data directory. Keep this destination to use the built-in sharing list.

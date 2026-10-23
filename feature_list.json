@@ -1,10 +1,10 @@
 {
   "project": "meshdrop",
-  "stage": 3,
-  "implementation": "implemented; Android runtime acceptance blocked by host emulator SIGSEGV",
+  "stage": 4,
+  "implementation": "implemented; host and pinned-container Android runtime scenarios verified",
   "automated_verification": {
     "linux_workspace": {
-      "passed": 72,
+      "passed": 76,
       "failed": 0
     },
     "three_container_scenarios": {
@@ -15,11 +15,11 @@
       "passed": 53,
       "failed": 0
     },
-    "hosted_ci": "configured; not run; no push",
+    "hosted_ci": "Ubuntu, Windows, macOS and Android debug build passed; final-push status reported with delivery",
     "desktop_webdriver": {
       "passed": 7,
       "failed": 0,
-      "rust_tests_passed": 72
+      "rust_tests_passed": 76
     },
     "windows_app_compile": "cargo check; see docs/verification.md",
     "android_jvm": {
@@ -28,11 +28,10 @@
     },
     "android_debug_apk": "x86_64 debug build passed; release signing not configured",
     "android_emulator": {
-      "passed": 0,
-      "status": "blocked before app installation",
-      "planned_scenarios": 8,
-      "runner_exit_code": 1,
-      "emulator_exit_code": -11,
+      "passed": 8,
+      "failed": 0,
+      "status": "host and pinned-container runners passed with Emulator 37.1.11 and swangle",
+      "runner_exit_code": 0,
       "evidence": "tests/android/README.md"
     }
   },
@@ -99,24 +98,23 @@
     },
     {
       "name": "tauri_android_target_and_private_storage",
-      "status": "implemented; native runtime unverified"
+      "status": "emulator verified; native picker/camera and physical behavior require acceptance"
     },
     {
       "name": "android_foreground_reception_and_multicast_lock",
-      "status": "implemented; native runtime unverified"
+      "status": "emulator verified; native picker/camera and physical behavior require acceptance"
     },
     {
       "name": "android_fileprovider_sharing_and_saf_import",
-      "status": "implemented; native runtime unverified"
+      "status": "emulator verified; native picker/camera and physical behavior require acceptance"
     },
     {
       "name": "android_camera_qr_and_permission_fallback",
-      "status": "implemented; native runtime unverified"
+      "status": "emulator verified; native picker/camera and physical behavior require acceptance"
     }
   ],
   "next_stages": [
-    "Physical Android and desktop acceptance",
-    "Resolve host emulator SIGSEGV and execute Android interoperability runner"
+    "Physical Android and desktop acceptance"
   ],
   "physical_acceptance": "docs/acceptance.md",
   "known_limits": [
@@ -129,8 +127,8 @@
     "Native file chooser presentation and GNOME/KDE/Windows/macOS integration require physical acceptance",
     "WebView2 app runtime is not executed in Wine",
     "Android dataSync foreground reception is subject to OS timeout, Doze and OEM restrictions",
-    "Android emulator crashes with SIGSEGV before boot; no Android end-to-end scenario has passed",
-    "Android sharing exposes completed files in the default private receive directory; keep that destination for sharing"
+    "Android sharing exposes completed files in the default private receive directory; keep that destination for sharing",
+    "Legacy SwiftShader GLES JIT faults on this host; swangle is the verified workaround"
   ],
   "excluded": [
     "iOS",

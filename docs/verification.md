@@ -1,18 +1,21 @@
-# Automated verification through Android stage three
+# Automated verification and hosted publication
 
-Commands run locally, without a push or hosted CI:
+Local verification commands:
 
 ```sh
 cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace
 ./tests/docker/run.sh
 ./tests/wine/run.sh
 ./tests/ui/run.sh
+./tests/android/run.sh
+# Optional fallback after debug APK build:
+./tests/android/container.sh
 ```
 
 | Suite | Actual result |
 |---|---|
 | fmt / clippy | Pass; clippy warnings denied |
-| Linux workspace | 72 passed, 0 failed: app state 17, CLI processes 5, transport 23, discovery 11, identity 4, storage/config/network 12 |
+| Linux workspace | 76 passed, 0 failed: app state/permissions 21, CLI processes 5, transport 23, discovery 11, identity 4, storage/config/network 12 |
 | Rootless Podman, three Ubuntu containers | 4 scenarios passed, 0 failed: mutual mDNS discovery, explicit pairing, bidirectional SHA-256 transfer, rejection without content |
 | Windows GNU target, containerized Wine | 53 passed, 0 failed: CLI processes 3, transport 23, discovery 11, identity 4, storage/config/network 12 |
 
@@ -20,10 +23,9 @@ Desktop WebDriver: 7 scenarios passed, 0 failed, with real CLI peers under Xvfb.
 Windows desktop: compile-only `cargo check -p meshdrop-app --locked --target
 x86_64-pc-windows-gnu`; desktop state tests run on Linux, not in Wine.
 
-Logs for this delivery are `/tmp/meshdrop-stage3-verify.log`,
-`/tmp/meshdrop-stage3-docker.log`, `/tmp/meshdrop-stage3-wine.log` and
-`/tmp/meshdrop-stage3-ui.log`. The UI runner also repeats workspace fmt, Clippy,
-72 Rust tests and binary builds inside its container.
+The UI runner also repeats workspace fmt, Clippy, 76 Rust tests and binary builds
+inside its container. Final execution logs are reported with the delivery rather
+than treated as persistent repository artifacts.
 
 The Linux process test transfers a sparse 128-MiB source through the real CLI and
 checks the receiving child process's own VmHWM is below 96 MiB. This measures the
@@ -48,8 +50,11 @@ See `tests/wine/README.md` for the two platform-specific tests not compiled on
 Windows. Wine may print headless XDG runtime diagnostics during initialization;
 all Windows test executables and CLI subprocesses completed successfully.
 
-Unverified: hosted Windows/macOS CI and physical environments listed in
-`docs/acceptance.md`. Tailscale parsing and missing-command behavior are tested with fixed fixtures
+Hosted CI has passed all four jobs: Ubuntu (72 tests), Windows (70 tests),
+macOS (71 tests), and Android ARM64 debug APK build, before the four new permission
+regressions. [Successful run](https://github.com/AquilaWei/meshdrop/actions/runs/39892968194).
+Final-push CI results are reported separately. Physical environments listed in
+`docs/acceptance.md` remain unverified. Tailscale parsing and missing-command behavior are tested with fixed fixtures
 and an injected path; enrollment and connectivity on an actual tailnet remain
 unverified.
 
@@ -75,7 +80,7 @@ HEAD. Additional coverage tests for already-correct cases also pass.
 Verification commands above completed with exit code 0. Container execution used
 rootless Podman. The Wine core/CLI suites exclude the same two target-specific
 tests listed in `tests/wine/README.md`; none of the core review regressions are
-excluded. The app crate's 17 state tests run on Linux, while Wine only compiles
+excluded. The app crate's 21 state/permission tests run on Linux, while Wine only compiles
 the Windows app target.
 
 ## Desktop implementation evidence
@@ -83,8 +88,7 @@ the Windows app target.
 Before the respective changes, sender-name propagation failed its assertion,
 receive completion timed out waiting for a verified-completion event, and the
 old desktop controller rejected the newly introduced discovery, transfer and
-settings commands. Those observations are retained in
-`/tmp/meshdrop-app-{metadata,completion,discovery,transfers,settings}-red.log`.
+settings commands.
 The corresponding feature commits include their tests. Seventeen application state tests
 cover receiver lifecycle, invalid configuration, partial discovery, accepted and
 rejected pairing, fingerprint mismatch, accepted/rejected/cancelled transfers,
@@ -101,22 +105,25 @@ Windows WebView2 and macOS integration remain in the physical checklist.
 
 `cargo tauri android build --debug --target x86_64` (from the app directory) and
 `:app:testUniversalDebugUnitTest` pass: debug APK produced, 8 JVM tests passed,
-0 failures (private sharing guard 5; multicast lease lifecycle 3). Log:
-`/tmp/meshdrop-stage3-android-build.log`. App QR command tests cover candidate
-addition without trust, unsupported QR versions and manual fallback after bad QR.
-The generated project retains minSdk 24 / targetSdk 36. CI includes a debug ARM64
-build job but hosted CI has not executed. ARM64 runtime is not claimed tested.
+0 failures (private sharing guard 5; multicast lease lifecycle 3). App QR command
+tests cover candidate addition without trust, unsupported versions and manual
+fallback. The generated project retains minSdk 24 / targetSdk 36. Hosted CI has
+built the ARM64 debug APK; ARM64 runtime is not claimed tested.
 
-Android E2E: **0 scenarios passed; blocked before installation**. The last two
-permitted attempts use the official API34 image with Emulator 36.3.10 and
-swiftshader_indirect/off; both runner exit 1, emulator SIGSEGV (-11).
-`/tmp/meshdrop-stage3-api34-swiftshader.log` and
-`/tmp/meshdrop-stage3-api34-off.log` record failures. Coredump PID 2871558
-(`/tmp/meshdrop-stage3-coredump.log`, inspection exit 0) confirms signal 11 with
-an unresolved frame; a renderer/driver root cause is not established.
-No successful Android sharing intent, background invitation, camera scan or
-notification flow is claimed. See `tests/android/README.md` to run the retained
-script in a working terminal/emulator and `docs/acceptance.md` for real phones.
+Android E2E: the host runner and pinned Debian-container runner each passed all
+8 scenarios with Emulator 37.1.11, swangle and the API34 x86_64 image, exit 0.
+Coverage: foreground service, explicit pairing through NAT, accepted reception
+and SHA-256, FileProvider chooser dispatch, sending and SHA-256, rejection without
+stored content, Home/background invitation with explicit decision, and Stop.
+Legacy SwiftShader GLES generated code faulted with SEGV_ACCERR; GDB callers were
+in libGLESv2.so. Swangle avoids that JIT path; the exact upstream cause remains
+unresolved. No user AVD or SDK levels were changed. Detailed runner reproduction
+and official archive checksum are in `tests/android/README.md`.
+
+Permission regression: extracting the unconditional native request produced two
+failed and two passed tests. Checking the existing grant first makes all four
+pass, preserving check/request error propagation and prompts for undecided users.
+The fix grants no additional webview capability.
 
 The selected-file path is injected through the existing command in the Android
 runner; SAF chooser interaction remains a physical check. Private default receive
@@ -135,13 +142,12 @@ crates/meshdrop-app/gen/android/gradlew -p crates/meshdrop-app/gen/android :app:
 ```
 
 `tests/android/run.sh` includes those checks plus the intended runtime scenarios.
-Its shell/Python syntax checks pass; its revised complete runtime flow remains
-unverified after the host emulator failure budget was exhausted.
+Its shell/Python syntax checks and complete runtime flow pass. The fallback uses
+the same scenarios with an independently checksum-pinned official emulator.
 
 APK version regression: the first metadata check failed (exit 1) because the
 Tauri-generated Android project fell back to versionName `1.0`. Gradle now reads
 the root workspace version and derives versionCode without another version
 literal. Rebuilt APK metadata matches Cargo and retains minSdk 24 / targetSdk 36
-(exit 0). Evidence: `/tmp/meshdrop-stage3-apk-version-red.log` and
-`/tmp/meshdrop-stage3-apk-version-green.log`. The runner executes the persistent
+(exit 0). The runner executes the persistent
 `tests/android/check_apk.py` check before attempting emulator tests.
