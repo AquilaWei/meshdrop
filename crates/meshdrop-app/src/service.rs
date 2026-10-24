@@ -946,10 +946,14 @@ mod tests {
         assert_eq!(received["transfers"][0]["files"][0]["status"], "complete");
         assert_eq!(
             received["transfers"][0]["files"][0]["saved_location"],
-            b.path().join("received/video.txt").display().to_string()
+            b.path()
+                .join("received")
+                .join("video.txt")
+                .display()
+                .to_string()
         );
         assert_eq!(
-            std::fs::read(b.path().join("received/video.txt")).unwrap(),
+            std::fs::read(b.path().join("received").join("video.txt")).unwrap(),
             b"desktop payload"
         );
         first.shutdown().await;
@@ -975,7 +979,7 @@ mod tests {
             .await
             .unwrap();
         wait_status(&first, "rejected").await;
-        assert!(!b.path().join("received/video.txt").exists());
+        assert!(!b.path().join("received").join("video.txt").exists());
         first.shutdown().await;
         second.shutdown().await;
     }
