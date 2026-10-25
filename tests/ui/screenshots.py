@@ -44,8 +44,15 @@ with tempfile.TemporaryDirectory(prefix='meshdrop-preview-') as folder:
                     ui.js('showPage(true); return true')
                 if screen == 'settings-network':
                     ui.js("showPage(true); openSettings('network'); return true")
-                # Capture only after the webview has committed its next frame.
-                ui.js('return document.body.offsetHeight')
+                # Layout flush alone does not commit WebKit's compositor. Wait
+                # for two animation frames so screenshots show the requested state.
+                ui.js('window.previewFrameReady = false; requestAnimationFrame(() => requestAnimationFrame(() => window.previewFrameReady = true)); return true')
+                ui.wait(lambda: ui.js('return window.previewFrameReady'))
+                small_targets = ui.js("return [...document.querySelectorAll('button,summary')].filter(node => node.getClientRects().length && (node.getBoundingClientRect().width < 44 || node.getBoundingClientRect().height < 44)).map(node => node.id || node.textContent)")
+                assert small_targets == [], f'Undersized targets: {small_targets}'
+                unnamed_icons = ui.js("return [...document.querySelectorAll('button.icon-button')].filter(node => !node.getAttribute('aria-label') || !node.title).map(node => node.id)")
+                assert unnamed_icons == [], f'Unnamed icons: {unnamed_icons}'
+                assert ui.js('return document.documentElement.scrollWidth <= window.innerWidth'), 'Horizontal overflow'
                 image = ui.http('GET', f'/session/{ui.session}/screenshot')
                 (OUTPUT / f'{screen}-{width}-{THEME}.png').write_bytes(base64.b64decode(image))
         print(f'PASS: native {THEME} mode and 12 preview screenshots', flush=True)

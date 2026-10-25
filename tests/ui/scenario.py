@@ -103,7 +103,8 @@ def main(root):
     # Keep the native refresh control focused while a real search runs. Disabling
     # the old button removes it from keyboard navigation on every timer tick.
     wait(lambda: js("return !refreshing"))
-    js("document.querySelector('#refresh').focus(); window.refreshNode = document.querySelector('#refresh'); refresh(); return true")
+    js("document.querySelector('#refresh').focus(); window.refreshNode = document.querySelector('#refresh'); const original = act; window.refreshCalls = 0; act = (operation,payload) => { if (operation === 'refresh') window.refreshCalls++; return original(operation,payload); }; refresh(); refresh(); act = original; return true")
+    assert js("return window.refreshCalls") == 1
     assert js("return !window.refreshNode.disabled"), "refresh must remain focusable during background search"
     assert js("return window.refreshNode.getAttribute('aria-busy') === 'true'"), "search must expose its active state"
     assert js("return document.activeElement === window.refreshNode"), "search stole keyboard focus"
@@ -166,7 +167,10 @@ def main(root):
     wait(lambda: (cli_received / "payload _img src=x onerror=alert(1)_.txt").exists())
     assert digest(source) == digest(cli_received / "payload _img src=x onerror=alert(1)_.txt")
     assert js("return [...document.querySelectorAll('#transfers progress')].some(p => p.value === 100)")
-    print("PASS: injected chooser result, app-to-CLI send, 100% progress and SHA-256", flush=True)
+    sent_id = js("return currentTransfers.find(item => item.direction === 'send').id")
+    known_path = js("window.knownPath = null; act('known_file',{id:arguments[0],name:arguments[1]}).then(value => window.knownPath = value); return true", [sent_id, source.name])
+    wait(lambda: js("return window.knownPath") == str(source))
+    print("PASS: injected chooser result, app-to-CLI send, recorded reveal path, 100% progress and SHA-256", flush=True)
 
     wait(lambda: "Paired" in text("#devices"))
     click("#devices button:not(:disabled)")
@@ -191,7 +195,7 @@ def main(root):
     rejected = root / "rejected.txt"; rejected.write_text("must not arrive")
     rejecting = launch([cli, "--state-dir", str(cli_dir), "send", incoming_target, str(rejected)], stdout=send_log, stderr=send_log)
     wait(lambda: rejected.name in text("#invitations"))
-    click("#invitations [data-action=reject]")
+    http("POST", f"/session/{session}/actions", {"actions":[{"type":"key","id":"keyboard","actions":[{"type":"keyDown","value":"\ue00c"},{"type":"keyUp","value":"\ue00c"}]}]})
     assert rejecting.wait(timeout=20) != 0
     assert not (app_received / rejected.name).exists()
     assert not list(app_received.glob("*.part"))
@@ -230,11 +234,21 @@ def main(root):
     wait(lambda: js("return document.querySelector('#more-page').hidden"))
     assert js("return document.activeElement.id") == "show-more"
     print("PASS: keyboard-only Settings activation and return focus", flush=True)
+    js("document.querySelector('#pair-confirm').disabled = false; document.querySelector('#outgoing-pair').showModal(); document.querySelector('#pair-dismiss').focus(); return true")
+    http("POST", f"/session/{session}/actions", {"actions":[{"type":"key","id":"keyboard","actions":[{"type":"keyDown","value":"\ue004"},{"type":"keyUp","value":"\ue004"}]}]})
+    assert js("return document.activeElement.closest('dialog')?.id") == "outgoing-pair"
+    http("POST", f"/session/{session}/actions", {"actions":[{"type":"key","id":"keyboard","actions":[{"type":"keyDown","value":"\ue00c"},{"type":"keyUp","value":"\ue00c"}]}]})
+    assert not js("return document.querySelector('#outgoing-pair').open")
+    print("PASS: modal keyboard focus containment and Escape cancellation", flush=True)
     js("document.querySelector('#selected-files button').click(); return true")
     wait(lambda: not text("#selected-files"))
     assert js("return chosenFiles.length") == 0
     print("PASS: remove one selected file", flush=True)
-    print("14 UI scenarios passed; 0 failed", flush=True)
+    js("window.__TAURI__.event.emit('tauri://drag-drop',{paths:[arguments[0]]}); return true", [str(source)])
+    wait(lambda: source.name in text("#selected-files"))
+    assert js("return chosenFiles.length") == 1
+    print("PASS: native Tauri drag-drop event selects files", flush=True)
+    print("16 UI scenarios passed; 0 failed", flush=True)
 
 
 if __name__ == "__main__":

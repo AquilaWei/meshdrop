@@ -4,3 +4,6 @@ CLAUDE.md
 .claude/
 
 /crates/meshdrop-app/gen/schemas/
+
+__pycache__/
+*.py[cod]

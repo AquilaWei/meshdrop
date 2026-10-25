@@ -102,7 +102,7 @@ and tooltip. Native dialogs trap focus; Escape cancels pairing or declines incom
 
 ### Verification limits
 
-The recorded UI run passed 14 real WebDriver scenarios and captured 24 deterministic
+The recorded UI run passed 16 real WebDriver scenarios and captured 24 deterministic
 preview screenshots at 1040px/390px in native light/dark themes. Preview screenshots
 illustrate UI states; real transport is verified separately by the WebDriver suite.
 Consult `/tmp/meshdrop-016-final-evidence.md` for the exact tested revisions and

@@ -8,6 +8,7 @@ let sendQueue = [];
 let sending = false;
 let refreshing = false;
 let androidStarted = false;
+let receivingStopped = false;
 let lastDevices = '';
 let lastInvitations = '';
 let platform = '';
@@ -146,7 +147,13 @@ function transfers(items) {
   const signature = JSON.stringify(items);
   if (signature === lastTransfers) return;
   lastTransfers = signature; currentTransfers = items; updateAvatars();
-  $('#announcements').textContent = items.map(item => `${item.peer}: ${item.status}`).join('. ');
+  const announcement = items.map(item => {
+    const bytes = item.files.reduce((sum,file) => sum + file.bytes,0);
+    const total = item.files.reduce((sum,file) => sum + file.total,0);
+    const percent = item.status === 'complete' ? 100 : total ? Math.floor(10*bytes/total)*10 : 0;
+    return `${item.peer}: ${item.status}, ${percent}%`;
+  }).join('. ');
+  if ($('#announcements').textContent !== announcement) $('#announcements').textContent = announcement;
   $('#transfers').replaceChildren();
   for (const transfer of items) {
     const box = element('div', undefined, 'transfer'); box.dataset.id = transfer.id;
@@ -155,11 +162,11 @@ function transfers(items) {
     const status = element('p', ({waiting:'Waiting for acceptance', accepted:'Transferring', complete:'Complete', rejected:'Rejected', timed_out:'Timed out', failed:'Failed', cancelled:'Cancelled'}[transfer.status] || transfer.status), 'transfer-status'); status.prepend(icon(transfer.status === 'complete' ? 'check' : ['rejected','cancelled'].includes(transfer.status) ? 'close' : ['failed','timed_out'].includes(transfer.status) ? 'warning' : 'clock')); box.append(status);
     for (const file of transfer.files) {
       const percent = file.status === 'complete' ? 100 : file.total ? Math.floor(100*file.bytes/file.total) : 0;
-      box.append(element('p', `${file.name} · ${percent}% · ${file.bytes}/${file.total} bytes`));
+      box.append(element('p', `${file.name} · ${percent}%`));
       if (file.saved_location) {
         box.append(element('p', `Saved to: ${file.saved_location}`, 'saved-location'));
       }
-      if (file.saved_location) {
+      if (file.saved_location && transfer.status === 'complete' && (platform !== 'android' || transfer.direction === 'receive')) {
         const reveal = iconButton(platform === 'android' ? 'share' : 'folder', platform === 'android' ? `Share ${file.name}` : `Reveal ${file.name}`);
         reveal.addEventListener('click', () => act(platform === 'android' ? 'share_file' : 'reveal_file', platform === 'android' ? {name:file.name} : {id:transfer.id,name:file.name}).catch(() => {}));
         box.append(reveal);
@@ -200,7 +207,7 @@ async function poll() {
     }
     $('#fingerprint').textContent = state.fingerprint;
     $('#qr-content').textContent = state.qr_content;
-    if (!state.error) setServiceState(`Receiving on port ${state.port}`);
+    if (!state.error && $('#error').hidden && !receivingStopped) setServiceState(`Receiving on port ${state.port}`);
     drawQR(state.qr); devices(state.devices); invitations(state.invitations); transfers(state.transfers);
     chosenFiles = state.selected_files || [];
     renderFiles();
@@ -344,7 +351,7 @@ async function startAndroid() {
 }
 $('#received-refresh').addEventListener('click', () => receivedFiles().catch(() => {}));
 $('#stop-receiver').addEventListener('click', async () => {
-  try { await act('android_stop'); setServiceState('Reception stopped'); $('#android-permission').textContent = 'Reception stopped. Reopen the app to start again.'; }
+  try { await act('android_stop'); receivingStopped = true; setServiceState('Reception stopped. Reopen the app to receive files.', true); $('#android-permission').textContent = 'Reception stopped. Reopen the app to start again.'; }
   catch (_) { /* displayed */ }
 });
 

@@ -87,7 +87,7 @@ faults on exit. On both runners this flag also enables emulator `-verbose` and
 `-debug-init`; these diagnosis flags are disabled by default. Failure output includes logcat,
 Android exit information and the emulator log when ADB is unavailable.
 
-The shared UI scenario opens More for received-file sharing and stopping reception,
+The shared UI scenario opens Settings → Receiving for received-file sharing and stopping reception,
 and asserts an unresolved address appears only in diagnostics. Both runners first
 run six activity/focus parser tests. Runtime checks wait for initial boot broadcasts
 to settle, then require the share chooser to be both resumed and focused before
