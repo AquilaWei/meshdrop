@@ -1,33 +1,30 @@
 <!doctype html>
 <html lang="en">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>meshdrop</title><link rel="stylesheet" href="style.css"><script src="app.js" defer></script></head>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>meshdrop</title><link rel="stylesheet" href="style.css"><script src="app.js" defer></script></head>
 <body>
-<header><div><span class="eyebrow">PRIVATE NETWORK · ENCRYPTED TRANSFERS</span><h1>meshdrop</h1></div><span id="service-state">Starting receiver…</span></header>
-<main>
-<nav aria-label="Pages"><button id="show-send">Send</button> <button id="show-more" class="secondary">More</button></nav>
+<header><div class="brand"><h1>meshdrop</h1><span id="service-state" role="status" aria-label="Starting receiver" title="Starting receiver"></span></div><div class="header-actions"><button id="refresh" class="icon-button" aria-label="Search for devices" title="Search for devices" aria-busy="false"></button><button id="show-more" class="icon-button" aria-label="Open Settings" title="Open Settings"></button></div></header>
+<main><p id="announcements" class="sr-only" role="status" aria-live="polite"></p>
 <div id="error" role="alert" hidden></div>
 <section id="fingerprint-error" role="alert" hidden><h2>Fingerprint mismatch</h2><p>The stored identity and the peer certificate differ. Connection refused. Verify the device locally before changing trust.</p></section>
 <div id="send-page">
-<section><div class="section-heading"><h2>Devices · tap to send</h2><button id="refresh">Search again</button></div><div id="devices"></div></section>
-
-<section><div class="section-heading"><h2>Files</h2><button id="pick-files">Choose files…</button></div><p id="selected-files">No files selected</p></section>
-
-<section><div class="section-heading"><h2>Transfers</h2></div><div id="transfers"></div></section>
+<section class="nearby"><h2>Nearby</h2><div id="devices" aria-label="Nearby devices"></div></section>
+<section class="selection"><button id="pick-files" class="icon-button" aria-label="Choose files" title="Choose files"></button><div id="selected-files" aria-label="Selected files"></div></section>
+<details id="recent" open><summary>Recent</summary><div id="transfers"></div></details>
 </div>
-<div id="more-page" hidden>
-<section id="android-controls" hidden><h2>Android reception</h2><p>Tailscale enumeration and opening receive folders are desktop-only. Use manual VPN addresses and Share below to access received files.</p><p id="android-permission" role="status"></p><button id="stop-receiver">Stop receiving</button><button id="scan-qr">Scan pairing QR</button><p>Manual addresses remain available when camera permission is denied.</p><h3>Received files</h3><button id="received-refresh">Refresh received files</button><div id="received-files"></div></section>
-<section class="identity"><div><h2>My device</h2><h3 id="my-name"></h3><label>Certificate fingerprint</label><p id="fingerprint" class="mono"></p><details><summary>QR content</summary><p id="qr-content" class="mono"></p></details></div><canvas id="qr" aria-label="Pairing QR code"></canvas></section>
-<section><h2>Add a device</h2><form id="manual"><label for="address">Add host:port or QR content</label><div class="input-row"><input id="address" required placeholder="192.168.1.20:9843"><button>Add device</button></div></form><ul id="problems" aria-label="Discovery diagnostics"></ul></section><section><button id="open-folder" class="secondary">Open receive folder</button></section>
-<section><h2>Settings</h2><p>Notification changes apply immediately. Restart the app to apply receive-folder and network settings.</p>
+<div id="more-page" hidden><div class="settings-heading"><button id="show-send" class="icon-button" aria-label="Go back" title="Go back"></button><h2 id="settings-title" tabindex="-1">Settings</h2></div><div id="settings-list" class="grouped-list"></div><div id="settings-content" hidden>
+<section id="android-controls" data-page="receiving" hidden><h2>Android reception</h2><p>Tailscale enumeration and opening receive folders are desktop-only. Use manual VPN addresses and Share below to access received files.</p><p id="android-permission" role="status"></p><button id="stop-receiver">Stop receiving</button><p>Manual addresses remain available when camera permission is denied.</p><h3>Received files</h3><button id="received-refresh">Refresh received files</button><div id="received-files"></div></section>
+<section class="identity" data-page="identity"><div><h2>My device</h2><h3 id="my-name"></h3><form id="name-form"><label for="setting-name">Device name</label><div class="input-row"><input id="setting-name" required><button>Save name</button></div><p id="name-status" role="status">Restart to apply a new name.</p></form><label>Certificate fingerprint</label><p id="fingerprint" class="mono"></p><details><summary>QR content</summary><p id="qr-content" class="mono"></p></details></div><canvas id="qr" aria-label="Pairing QR code"></canvas></section>
+<section data-page="add"><h2>Add Device</h2><button id="scan-qr" hidden>Scan QR</button><form id="manual"><label for="address">Add host:port or QR content</label><div class="input-row"><input id="address" required placeholder="192.168.1.20:9843"><button>Add device</button></div></form></section><section data-page="receiving"><button id="open-folder" class="secondary">Open receive folder</button></section>
+<section id="configuration"><h2 class="sr-only">Configuration</h2><p>Notification changes apply immediately. Restart the app to apply receive-folder and network settings.</p>
 <form id="settings-form">
-<label for="setting-folder">Receive folder</label><input id="setting-folder" required>
-<label for="setting-port">Port</label><input id="setting-port" type="number" min="1" max="65535" required>
-<label for="setting-networks">Allowed networks (one CIDR per line)</label><textarea id="setting-networks" rows="4"></textarea>
-<fieldset><legend>Discovery providers</legend><label><input type="checkbox" name="provider" value="mdns"> mDNS</label><label><input type="checkbox" name="provider" value="manual"> Manual</label><label><input type="checkbox" name="provider" value="peer-list"> Peer list</label><label><input type="checkbox" name="provider" value="tailscale"> Tailscale</label></fieldset>
-<label for="setting-invitation">Invitation timeout (seconds)</label><input id="setting-invitation" type="number" min="1" required>
-<label for="setting-idle">Idle timeout (seconds without bytes)</label><input id="setting-idle" type="number" min="1" required>
-<label><input id="setting-notifications" type="checkbox"> System notifications</label><button>Save settings</button>
-</form><p id="settings-status" role="status"></p><details><summary>Advanced TOML editor</summary><textarea id="settings-toml" aria-label="Configuration TOML"></textarea><button id="save-toml">Validate and save TOML</button></details></section>
-</div><dialog id="outgoing-pair" role="dialog" aria-label="Confirm pairing"><h2>Compare the code on both devices</h2><p id="pair-name"></p><strong id="pair-code" class="code"></strong><p>Only confirm when the six digits match.</p><button id="pair-confirm">Codes match — pair</button><button id="pair-dismiss" class="secondary">Cancel</button><p id="pair-status" role="status"></p></dialog><dialog id="incoming-dialog" aria-label="Incoming requests"><h2>Incoming requests</h2><div id="invitations"></div></dialog>
+<label data-page="receiving" for="setting-folder">Receive folder</label><input data-page="receiving" id="setting-folder" required>
+<label data-page="receiving" for="setting-port">Port</label><input data-page="receiving" id="setting-port" type="number" min="1" max="65535" required>
+<label data-page="network" for="setting-networks">Allowed networks (one CIDR per line)</label><textarea data-page="network" id="setting-networks" rows="4"></textarea>
+<fieldset data-page="network"><legend>Discovery providers</legend><label><input type="checkbox" name="provider" value="mdns"> mDNS</label><label><input type="checkbox" name="provider" value="manual"> Manual</label><label><input type="checkbox" name="provider" value="peer-list"> Peer list</label><label><input type="checkbox" name="provider" value="tailscale"> Tailscale</label></fieldset>
+<label data-page="network" for="setting-invitation">Invitation timeout (seconds)</label><input data-page="network" id="setting-invitation" type="number" min="1" required>
+<label data-page="network" for="setting-idle">Idle timeout (seconds without bytes)</label><input data-page="network" id="setting-idle" type="number" min="1" required>
+<label data-page="receiving"><input id="setting-notifications" type="checkbox"> System notifications</label><button>Save settings</button>
+</form><p id="settings-status" role="status"></p><details data-page="advanced"><summary>Advanced TOML editor</summary><textarea id="settings-toml" aria-label="Configuration TOML"></textarea><button id="save-toml">Validate and save TOML</button></details></section>
+<section data-page="advanced"><h2>Diagnostics</h2><ul id="problems" aria-label="Discovery diagnostics"></ul></section></div></div><dialog id="outgoing-pair" role="dialog" aria-label="Confirm pairing"><h2>Compare the code on both devices</h2><div id="pair-avatar" class="avatar" aria-hidden="true"></div><p id="pair-name"></p><strong id="pair-code" class="code"></strong><p>Only confirm when the six digits match.</p><button id="pair-confirm">Codes Match</button><button id="pair-dismiss" class="secondary">Cancel</button><p id="pair-status" role="status"></p></dialog><dialog id="incoming-dialog" aria-label="Incoming requests"><h2>Incoming request</h2><div id="invitations"></div></dialog>
 </main><footer>Receive service runs while this window is open. Closing the window stops it safely.</footer>
 </body></html>

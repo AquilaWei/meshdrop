@@ -245,6 +245,42 @@ impl Actor {
                 );
                 Ok(self.view["selected_files"].clone())
             })()),
+            "remove_file" => Some((|| {
+                let index = payload["index"].as_u64().context("missing file index")? as usize;
+                if index >= self.selected_files.len() {
+                    bail!("selected file no longer exists; choose files again");
+                }
+                self.selected_files.remove(index);
+                self.view["selected_files"] = json!(
+                    self.selected_files
+                        .iter()
+                        .map(|path| path.file_name().unwrap_or_default().to_string_lossy())
+                        .collect::<Vec<_>>()
+                );
+                Ok(self.view["selected_files"].clone())
+            })()),
+            // Resolve only a completed transfer's recorded path, never a UI path.
+            "known_file" => Some((|| {
+                let id = text(&payload, "id")?;
+                let name = text(&payload, "name")?;
+                let row = self.view["transfers"]
+                    .as_array()
+                    .context("missing transfers")?
+                    .iter()
+                    .find(|row| row["id"] == id && row["status"] == "complete")
+                    .context("completed transfer not found")?;
+                let file = row["files"]
+                    .as_array()
+                    .context("missing files")?
+                    .iter()
+                    .find(|file| file["name"] == name)
+                    .context("transfer file not found")?;
+                Ok(json!(
+                    file["saved_location"]
+                        .as_str()
+                        .context("file location unavailable")?
+                ))
+            })()),
             "receive_directory" => Some(Ok(json!(self.session.config.receive_directory))),
             "notice_error" => {
                 self.view["error"] = payload.clone();
@@ -416,6 +452,16 @@ impl Actor {
                 })
                 .collect::<Vec<_>>();
             self.add_transfer(&id, "send", &target, &files, "waiting");
+            if let Some(row) = self.transfer(&id) {
+                for (file, path) in row["files"]
+                    .as_array_mut()
+                    .expect("files")
+                    .iter_mut()
+                    .zip(&paths)
+                {
+                    file["saved_location"] = json!(path);
+                }
+            }
             let session = self.session.clone();
             let updates = updates.clone();
             ids.push(id.clone());
@@ -786,6 +832,56 @@ mod tests {
             .await
             .unwrap();
         (directory, controller, rx)
+    }
+    #[tokio::test]
+    async fn removing_one_file_preserves_the_other_selection() {
+        let (_directory, controller, _notices) = profile("Files", "[]").await;
+        controller
+            .call("select_files", json!(["/tmp/first.txt", "/tmp/second.txt"]))
+            .await
+            .unwrap();
+        assert_eq!(
+            controller
+                .call("remove_file", json!({"index":0}))
+                .await
+                .unwrap(),
+            json!(["second.txt"])
+        );
+        assert_eq!(
+            controller.call("snapshot", Value::Null).await.unwrap()["selected_files"],
+            json!(["second.txt"])
+        );
+        controller.shutdown().await;
+    }
+    #[tokio::test]
+    async fn invalid_removal_preserves_selection() {
+        let (_directory, controller, _notices) = profile("Files", "[]").await;
+        controller
+            .call("select_files", json!(["/tmp/first.txt"]))
+            .await
+            .unwrap();
+        assert!(
+            controller
+                .call("remove_file", json!({"index":4}))
+                .await
+                .is_err()
+        );
+        assert_eq!(
+            controller.call("snapshot", Value::Null).await.unwrap()["selected_files"],
+            json!(["first.txt"])
+        );
+        controller.shutdown().await;
+    }
+    #[tokio::test]
+    async fn reveal_rejects_paths_without_a_completed_transfer() {
+        let (_directory, controller, _notices) = profile("Files", "[]").await;
+        assert!(
+            controller
+                .call("known_file", json!({"id":"unknown", "name":"/etc/passwd"}))
+                .await
+                .is_err()
+        );
+        controller.shutdown().await;
     }
     #[tokio::test]
     async fn scanned_qr_does_not_establish_trust() {

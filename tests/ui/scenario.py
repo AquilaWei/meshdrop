@@ -100,6 +100,23 @@ def main(root):
     wait(lambda: http("GET", "/status"))
     session = http("POST", "/session", {"capabilities": {"alwaysMatch": {"tauri:options": {"application": str(Path("target/debug/meshdrop-app").resolve())}}}})["sessionId"]
     wait(lambda: "Receiving on port 19843" in text("#service-state"))
+    # Keep the native refresh control focused while a real search runs. Disabling
+    # the old button removes it from keyboard navigation on every timer tick.
+    wait(lambda: js("return !refreshing"))
+    js("document.querySelector('#refresh').focus(); window.refreshNode = document.querySelector('#refresh'); refresh(); return true")
+    assert js("return !window.refreshNode.disabled"), "refresh must remain focusable during background search"
+    assert js("return window.refreshNode.getAttribute('aria-busy') === 'true'"), "search must expose its active state"
+    assert js("return document.activeElement === window.refreshNode"), "search stole keyboard focus"
+    assert js("return getComputedStyle(window.refreshNode.querySelector('svg')).animationName") == "spin"
+    wait(lambda: js("return !refreshing"))
+    js("window.refreshMutations = 0; window.refreshObserver = new MutationObserver(changes => window.refreshMutations += changes.length); window.refreshObserver.observe(window.refreshNode,{childList:true,subtree:true,attributes:true,attributeFilter:['class','style','disabled']}); return true")
+    time.sleep(1.1)  # More than three 300ms snapshots must not restyle the control.
+    assert js("return window.refreshMutations") == 0
+    assert js("return document.activeElement === window.refreshNode")
+    js("window.refreshObserver.disconnect(); return true")
+    assert js("return document.querySelector('#refresh') === window.refreshNode"), "poll replaced refresh control"
+    assert js("return window.refreshNode.getAttribute('aria-busy') === 'false'")
+    print("PASS: refresh starts/stops without disabling, replacing or stealing focus", flush=True)
     assert not js("return document.querySelector('#send, #devices input[type=checkbox]')")
     wait(lambda: peer_name in text("#devices"), 45)
     assert js("return document.querySelector('#qr').width > 100")
@@ -108,10 +125,12 @@ def main(root):
 
     assert js("return document.querySelector('#more-page').hidden")
     click("#show-more")
+    click("[data-settings=add]")
     fill("#address", "127.0.0.1:1")
     click("#manual button")
     wait(lambda: "127.0.0.1:1" in text("#problems"))
     assert "127.0.0.1:1" not in text("#devices")
+    click("#show-send")
     click("#show-send")
     print("PASS: unresolved/non-meshdrop candidate is diagnostic only", flush=True)
 
@@ -166,7 +185,7 @@ def main(root):
     wait(lambda: (app_received / incoming.name).exists())
     assert digest(incoming) == digest(app_received / incoming.name)
     wait(lambda: js("return [...document.querySelectorAll('.transfer-status')].filter(n => n.textContent === 'Complete').length >= 3"))
-    wait(lambda: str(app_received / incoming.name) in text("#transfers .saved-location"))
+    wait(lambda: str(app_received / incoming.name) in text("#transfers"))
     print("PASS: CLI-to-app acceptance, SHA-256 and saved-location display", flush=True)
 
     rejected = root / "rejected.txt"; rejected.write_text("must not arrive")
@@ -184,38 +203,64 @@ def main(root):
     print("PASS: malicious device names and filenames display as text", flush=True)
 
     click("#show-more")
+    click("[data-settings=advanced]")
     js("document.querySelector('#settings-toml').closest('details').open = true; return true")
     fill("#settings-toml", "prot = 1234")
     click("#save-toml")
     wait(lambda: "config.toml" in text("#error") and "prot" in text("#error"))
     assert "port = 19843" in (app_dir / "config.toml").read_text()
     print("PASS: invalid TOML reports path and preserves saved settings", flush=True)
-    print("9 UI scenarios passed; 0 failed", flush=True)
+    click("#show-send")
+    assert text("#settings-title") == "Settings"
+    click("[data-settings=receiving]")
+    assert text("#settings-title") == "Receiving"
+    fill("#setting-port", "19843")
+    click("#settings-form button")
+    wait(lambda: "Saved." in text("#settings-status"))
+    assert "port = 19843" in (app_dir / "config.toml").read_text()
+    click("#show-send")
+    click("#show-send")
+    print("PASS: Settings level navigation, back and save", flush=True)
+    # Native WebDriver key input exercises keyboard activation and modal Escape.
+    js("document.querySelector('#show-more').focus(); return true")
+    http("POST", f"/session/{session}/actions", {"actions":[{"type":"key","id":"keyboard","actions":[{"type":"keyDown","value":"\ue007"},{"type":"keyUp","value":"\ue007"}]}]})
+    wait(lambda: not js("return document.querySelector('#more-page').hidden"))
+    js("document.querySelector('#show-send').focus(); return true")
+    http("POST", f"/session/{session}/actions", {"actions":[{"type":"key","id":"keyboard","actions":[{"type":"keyDown","value":"\ue007"},{"type":"keyUp","value":"\ue007"}]}]})
+    wait(lambda: js("return document.querySelector('#more-page').hidden"))
+    assert js("return document.activeElement.id") == "show-more"
+    print("PASS: keyboard-only Settings activation and return focus", flush=True)
+    js("document.querySelector('#selected-files button').click(); return true")
+    wait(lambda: not text("#selected-files"))
+    assert js("return chosenFiles.length") == 0
+    print("PASS: remove one selected file", flush=True)
+    print("14 UI scenarios passed; 0 failed", flush=True)
 
 
-with tempfile.TemporaryDirectory(prefix="meshdrop-ui-") as folder:
-    root = Path(folder)
-    try:
-        main(root)
-    except Exception:
-        if session:
-            try:
-                print(js("return document.body.innerText"), flush=True)
-            except Exception:
-                pass
-        for log in root.glob("*.log"):
-            print(f"--- {log.name} ---\n{log.read_text()[-16000:]}", flush=True)
-        raise
-    finally:
-        if session:
-            try:
-                http("DELETE", f"/session/{session}")
-            except Exception:
-                pass
-        for process in reversed(processes):
-            if process.poll() is None:
-                process.terminate()
+if __name__ == "__main__":
+    with tempfile.TemporaryDirectory(prefix="meshdrop-ui-") as folder:
+        root = Path(folder)
+        try:
+            main(root)
+        except Exception:
+            if session:
                 try:
-                    process.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    process.kill(); process.wait()
+                    print(js("return document.body.innerText"), flush=True)
+                except Exception:
+                    pass
+            for log in root.glob("*.log"):
+                print(f"--- {log.name} ---\n{log.read_text()[-16000:]}", flush=True)
+            raise
+        finally:
+            if session:
+                try:
+                    http("DELETE", f"/session/{session}")
+                except Exception:
+                    pass
+            for process in reversed(processes):
+                if process.poll() is None:
+                    process.terminate()
+                    try:
+                        process.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        process.kill(); process.wait()

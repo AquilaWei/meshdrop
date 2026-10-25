@@ -8,4 +8,7 @@ trap '"$engine" rm -f "$container" >/dev/null' EXIT
 tar --exclude=build --exclude=.gradle --exclude=.kotlin --exclude=.tauri --exclude=jniLibs --exclude=local.properties --exclude='*.keystore' --exclude='*.jks' --exclude=.git --exclude=target --exclude=.harnessboard --exclude=.aws --exclude=.codex --exclude=.agents --exclude=.claude --exclude=notes --exclude=CLAUDE.md -cf - . | "$engine" cp - "$container:/workspace/"
 "$engine" start -a "$container"
 status=$("$engine" inspect --format '{{.State.ExitCode}}' "$container")
+if [[ "$status" == 0 ]]; then
+  "$engine" cp "$container:/tmp/meshdrop-016-screens" /tmp/
+fi
 exit "$status"

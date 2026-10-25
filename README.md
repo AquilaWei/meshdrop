@@ -141,10 +141,13 @@ closing it cancels reception and withdraws discovery. Use `MESHDROP_STATE_DIR` t
 select an isolated profile; otherwise the CLI and app share the platform config
 folder and cannot bind the same port simultaneously.
 
-The shared desktop/Android main page shows **Devices**, **Files** and **Transfers**. Search starts automatically; **Search
-again** refreshes it. Only reachable devices with a successful meshdrop certificate
+![meshdrop main screen with an active send](docs/screenshot-main.png)
+
+The shared desktop/Android main page shows nearby device avatars, file chips and
+collapsible **Recent** transfers. Search starts automatically; the refresh icon
+spins while searching and background discovery keeps the grid current. Only reachable devices with a successful meshdrop certificate
 probe appear. Failed probes, unresolved addresses and offline/non-meshdrop
-Tailscale peers appear only in **More → diagnostics**. Discovery never grants trust.
+Tailscale peers appear only in **Settings → Advanced → Diagnostics**. Discovery never grants trust.
 
 **Tap a device to send immediately.** With no files selected, the chooser opens
 first and sending continues after selection. Tap other devices in sequence to
@@ -156,9 +159,11 @@ completion, rejection, timeout or failure; active transfers have **Cancel**.
 Incoming pairing and file invitations open modal dialogs and require a decision.
 Completed receives show each file’s saved location. Device names and filenames render as text.
 
-**More** contains local identity/QR, manual addresses, diagnostics, settings/TOML
-and the receive folder. Android also keeps QR scanning, received files/sharing and
-Stop receiving here. Background Android notifications retain their existing behavior.
+**Settings** groups My Device, Add Device, Receiving, Network and Advanced.
+Use the paperclip to choose files, remove individual file chips, or drag files
+into the desktop window. Recent shows saved locations, with desktop reveal-in-folder
+and Android sharing controls. Android QR scanning lives in Add Device; received
+files and Stop receiving live in Receiving. Background Android notifications retain their existing behavior.
 Settings are saved atomically to the shared `config.toml`; unknown keys include the
 file path in the error. `notifications_enabled` toggles desktop notifications
 immediately. Restart after changing the receive folder, port, providers, networks
@@ -186,7 +191,7 @@ On **Android 10+ (API 29+)**, verified files are streamed into the public
 copy finishes and are deleted on copy failure. New entries and collision renaming
 preserve existing files. No broad storage permission is requested. The completion
 view shows the Download name and content URI. A verified private copy is retained
-for the received-files list; **More → Refresh received files → Share** shares the
+for the received-files list; **Settings → Receiving → Refresh received files → Share** shares the
 public entry with a temporary read grant.
 
 On **Android 9 and below**, receives remain in app-private storage; uninstalling

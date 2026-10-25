@@ -7,7 +7,7 @@ Only checks not established by local/Wine/container simulation are listed here.
 | Real Windows | Build with stable Rust, run `receive`, pair with Linux, transfer Unicode filenames and an existing filename in both directions. Repeat on an NTFS destination under normal user permissions; press console Ctrl-C during reception. | Prompts and progress work in the native terminal; bytes match SHA-256; existing files remain; no partial files remain on cancellation; console Ctrl-C exits cleanly. |
 | Real macOS | Build locally, launch from Terminal, pair and transfer with Linux/Windows; test sleep/wake and network changes. | Identity survives restart, pairing remains valid, transfers fail clearly on disconnect and resume only through a new invitation. |
 | Real Wi-Fi / Ethernet LAN | Put three hosts on one LAN, permit TCP 9843 and UDP 5353, run `receive`, then `devices`; repeat with an access point that isolates clients. | Reachable peers appear; isolated networks do not claim connectivity. Router multicast filtering can prevent discovery; manual addresses remain usable where routing permits. |
-| Tailscale / ZeroTier / WireGuard deployment | Enable the optional Tailscale provider on a Tailscale host; use manual addresses for other VPNs. Pair and transfer through the actual VPN routing/firewall policy. | Tailscale enumerates and probes actual peers; other routed private addresses work independently of Tailscale; unreachable peers appear only in More diagnostics. |
+| Tailscale / ZeroTier / WireGuard deployment | Enable the optional Tailscale provider on a Tailscale host; use manual addresses for other VPNs. Pair and transfer through the actual VPN routing/firewall policy. | Tailscale enumerates and probes actual peers; other routed private addresses work independently of Tailscale; unreachable peers appear only in Settings → Advanced diagnostics. |
 | OS shutdown and storage behavior | Cancel transfers during sleep, unplug an external destination drive, and retry on its actual filesystem. | No existing file is replaced; errors are visible; temporary files are removed where the filesystem remains accessible. Abrupt power loss may leave hidden temporary files and is not an orderly cancellation. |
 
 ## Desktop integration
@@ -32,7 +32,7 @@ pairing, bidirectional hashes, rejection and FileProvider chooser dispatch.
 | Native notification actions and appearance | Send an invitation with the phone locked, tap its notification, then use Stop receiving in the ongoing notification. | Notification appears correctly; tap returns to the pending decision; the native Stop action stops reception. Basic Home reception and in-app Stop are already emulator-tested. |
 | Doze / battery | Test with screen off and Android Doze; test both optimized and explicitly unrestricted battery settings. Leave receiving beyond the OS dataSync runtime allowance. | Document delays and system restrictions. App reports stopped reception rather than claiming indefinite reception; reopen to receive again after the OS timeout. |
 | Notification permission | On Android 13+, deny POST_NOTIFICATIONS, send an offer while app is visible, then enable permission in system settings and restart. | Denial is explained; explicit in-app decisions still work. After permission is enabled, native invitations and ongoing notification are visible. |
-| Camera QR permission | Open More, scan a real meshdrop QR from another device, tap it on Send and choose a file; compare codes and pair. Repeat with a foreign QR, denied camera permission and a changed certificate. | Only valid versioned meshdrop QR is accepted; both users confirm codes; changed pins are rejected. Denied permission keeps manual/pasted input usable. |
+| Camera QR permission | Open Settings → Add Device, scan a real meshdrop QR from another device, tap it on Send and choose a file; compare codes and pair. Repeat with a foreign QR, denied camera permission and a changed certificate. | Only valid versioned meshdrop QR is accepted; both users confirm codes; changed pins are rejected. Denied permission keeps manual/pasted input usable. |
 | Native documents / received sharing | Pick multiple files through the Android document provider and send them. Receive two identically named files, then Share each from Received files. Try an unfinished transfer. | Selected SAF content matches SHA-256 at destination; completed files never overwrite one another; sharing grants temporary read access to completed public Download entries on API 29+, or private receive files on older Android. Partial files and private identities cannot be shared. |
 | OEM background restrictions | Repeat Home, screen-off and notification tests on the user's phone brand, including its battery/auto-start controls. | Record settings required by that manufacturer; do not promise a foreground service bypasses Doze or forced process termination. |
 | Cross-platform interoperability | Pair independently with Fedora, Windows and macOS; transfer Unicode filenames, multiple files, collisions and a large file in both directions; cancel on each side. | Explicit pairing/accept/reject, progress, cancellation cleanup and hash verification work on native devices. |
@@ -45,12 +45,12 @@ established by those simulations; see `tests/android/README.md`.
 
 On Fedora and the phone, open the app and verify Devices, Files and Transfers
 appear on the main page and searching starts automatically. Include an offline Tailscale peer and a
-non-meshdrop host: neither should appear in the device list; More shows diagnostics.
+non-meshdrop host: neither should appear in the device list; Settings → Advanced shows diagnostics.
 Tap an unpaired meshdrop peer with no files selected, choose files, compare codes
 on both screens, and confirm on both sides. The invitation must follow without another
 Send click. Repeat with the paired peer: no code prompt. Reject an invitation,
 let one time out, and cancel a large transfer; each target must show its own result.
-Verify More exposes every secondary feature, including Android sharing and Stop.
+Verify Settings exposes every secondary feature, including Android sharing and Stop.
 These changed flows have automated scenarios but are not claimed physically tested.
 
 ## Receive locations and Android share target (0.1.5)
@@ -72,3 +72,40 @@ Physical checks still required:
   Downloads is intentionally unavailable there.
 
 The phone install/startup smoke does not establish these physical transfer checks.
+
+## Apple-style interface (0.1.6)
+
+The main screen uses avatars with transfer rings, removable file chips and
+collapsible Recent history. Refresh remains keyboard-focusable during searches.
+Settings uses a grouped first level and a back button at each level. Name, folder,
+port and network changes require restart; notifications apply immediately.
+Light/dark themes follow the system; reduced motion replaces the search rotation
+with a static searching indicator. Every icon-only action has an accessible name
+and tooltip. Native dialogs trap focus; Escape cancels pairing or declines incoming requests.
+
+### More → Settings mapping
+
+| Old location | New location |
+| --- | --- |
+| More → My device name | Settings → My Device → Device name |
+| More → Certificate fingerprint / QR content / QR canvas | Settings → My Device |
+| More → Add host:port or QR content | Settings → Add Device |
+| More → Android Scan pairing QR | Settings → Add Device → Scan QR |
+| More → Open receive folder | Settings → Receiving → Open receive folder |
+| More → Receive folder / Port / System notifications | Settings → Receiving |
+| More → Android permission status / Stop receiving | Settings → Receiving |
+| More → Android received files / Refresh / Share | Settings → Receiving → Received files (also Recent share) |
+| More → Allowed networks / Discovery providers / Invitation timeout / Idle timeout | Settings → Network |
+| More → Discovery diagnostics | Settings → Advanced → Diagnostics |
+| More → Advanced TOML editor | Settings → Advanced → Advanced TOML editor |
+| More → Save settings / Validate and save TOML | Settings → Receiving or Network → Save settings / Advanced → Validate and save TOML |
+
+### Verification limits
+
+The recorded UI run passed 14 real WebDriver scenarios and captured 24 deterministic
+preview screenshots at 1040px/390px in native light/dark themes. Preview screenshots
+illustrate UI states; real transport is verified separately by the WebDriver suite.
+Consult `/tmp/meshdrop-016-final-evidence.md` for the exact tested revisions and
+remaining Android/device/integration checks. Physical screen-reader operation,
+real desktop file-manager reveal, native OS drag/drop and phone transfer acceptance
+remain required before declaring physical-device acceptance.

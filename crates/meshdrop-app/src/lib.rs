@@ -51,6 +51,16 @@ async fn desktop_request(
             .map_err(|e| e.to_string())?;
         return Ok(serde_json::Value::Null);
     }
+    if operation == "reveal_file" {
+        if cfg!(target_os = "android") {
+            return Err("Use Share to open received files on Android".into());
+        }
+        let path = state.call("known_file", payload).await?;
+        app.opener()
+            .reveal_item_in_dir(path.as_str().ok_or("invalid file location")?)
+            .map_err(|e| e.to_string())?;
+        return Ok(serde_json::Value::Null);
+    }
     state.call(&operation, payload).await
 }
 /// Starts the native shell; setup errors are shown by Tauri and abort startup.
