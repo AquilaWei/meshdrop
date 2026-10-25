@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.1.6 - 2026-10-24
+
+PATCH test build; physical-device acceptance is pending.
+
+- Show nearby devices as avatars with transfer progress and cancellation.
+- Keep search controls stable during background updates and follow light/dark system appearance.
+- Organize Settings into My Device, Add Device, Receiving, Network and Advanced.
+- Remove individual selected files, select desktop files by dragging into the window, and reveal completed transfers in their folders.
+- Improve invitation sheets, keyboard navigation, reduced motion and accessible control labels.
+
 ## 0.1.5 - 2026-10-23
 
 PATCH test build; full physical-device transfer acceptance is pending.
