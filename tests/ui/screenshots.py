@@ -39,7 +39,7 @@ with tempfile.TemporaryDirectory(prefix='meshdrop-preview-') as folder:
                 if screen == 'connected':
                     ui.js("preview.transfers=[]; transfers([]); lastDevices=''; devices(preview.devices); return true")
                 if screen == 'choose-first':
-                    ui.js("document.querySelector('#send-hint').textContent='Press ＋ to choose files first.'; chosenFiles=[]; renderFiles(); return true")
+                    ui.js("document.querySelector('#send-hint').textContent='Press + to choose files first.'; chosenFiles=[]; renderFiles(); return true")
                 if screen == 'incoming':
                     ui.js("preview.invitations=[{id:'incoming',kind:'files',name:'Sam’s phone',peer:'sam',detail:{files:[{name:'Weekend.jpg',size:2400000},{name:'Notes.pdf',size:120000}]}}]; invitations(preview.invitations); return true")
                 if screen == 'pairing':

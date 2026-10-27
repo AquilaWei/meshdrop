@@ -302,7 +302,7 @@ async function tapDevice(device) {
   try {
     if (!device.paired) { await preparePair(device.pairing_address || device.target); return; }
     if (!chosenFiles.length) {
-      setText('#send-hint','Press ＋ to choose files first.');
+      setText('#send-hint','Press + to choose files first.');
       return;
     }
     setText('#send-hint','');

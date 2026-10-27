@@ -157,7 +157,7 @@ six-digit code on both devices and confirm on both sides; the avatar then shows
 **Connected**. Pairing does not send files. The bottom **＋** is the only in-app
 file picker: add files over several picks and remove any file chip. Tapping a
 connected avatar sends all selected files in **one invitation**. With no files,
-it announces “Press ＋ to choose files first.” Fingerprint mismatches disable the
+it announces “Press + to choose files first.” Fingerprint mismatches disable the
 avatar. Incoming invitations still require an explicit decision.
 
 Each transfer shows progress and its result. Active avatars have a separate

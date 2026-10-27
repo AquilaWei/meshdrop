@@ -1,6 +1,5 @@
 """Real Tauri WebDriver and a separate meshdrop CLI process."""
 import hashlib
-from http.client import RemoteDisconnected
 import json
 import os
 from pathlib import Path
@@ -13,25 +12,21 @@ import urllib.request
 
 ELEMENT = "element-6066-11e4-a52e-4f735466cecf"
 BASE = "http://127.0.0.1:4444"
+NATIVE = "http://127.0.0.1:4445"
 session = None
 processes = []
 
 
 def http(method, path, body=None):
     data = None if body is None else json.dumps(body).encode()
-    request = urllib.request.Request(BASE + path, data=data, method=method, headers={"Content-Type": "application/json"})
-    try:
-        with urllib.request.urlopen(request, timeout=30) as response:
-            value = json.load(response)["value"]
-    except RemoteDisconnected:
-        # WebKitWebDriver occasionally closes a pooled HTTP connection. Retry
-        # read-only observations only; never replay a click, key or command.
-        read_only = method == "GET" or (path.endswith('/execute/sync') and body['script'].startswith('return '))
-        if not read_only:
-            raise
-        print(f"WebDriver connection closed during read: {path}; retrying observation", flush=True)
-        with urllib.request.urlopen(request, timeout=30) as response:
-            value = json.load(response)["value"]
+    # tauri-driver translates session creation capabilities, then proxies every
+    # command through a pooled client with retry_canceled_requests(false). Talk
+    # directly to its native WebKitWebDriver for the existing session so a stale
+    # intermediary connection cannot lose a click/key response. Never replay input.
+    endpoint = NATIVE if path.startswith('/session/') else BASE
+    request = urllib.request.Request(endpoint + path, data=data, method=method, headers={"Content-Type": "application/json"})
+    with urllib.request.urlopen(request, timeout=30) as response:
+        value = json.load(response)["value"]
     if isinstance(value, dict) and "error" in value:
         raise RuntimeError(value)
     return value
@@ -63,13 +58,7 @@ def click(selector):
 def fill(selector, value):
     node = http("POST", f"/session/{session}/element", {"using": "css selector", "value": selector})
     http("POST", f"/session/{session}/element/{node[ELEMENT]}/clear", {})
-    try:
-        http("POST", f"/session/{session}/element/{node[ELEMENT]}/value", {"text": value})
-    except RemoteDisconnected:
-        # The remote may have applied the text before closing its response.
-        # Verify the resulting value instead of replaying native key input.
-        wait(lambda: js('return document.querySelector(arguments[0]).value', [selector]) == value)
-        print(f"WebDriver text response closed; verified completed value for {selector}", flush=True)
+    http("POST", f"/session/{session}/element/{node[ELEMENT]}/value", {"text": value})
 
 
 def text(selector):
@@ -224,7 +213,7 @@ def main(root):
     wait(lambda: js("return chosenFiles.length === 0"))
     print("PASS: each selected file can be removed independently", flush=True)
     click("#devices button:not(:disabled)")
-    wait(lambda: "Press ＋" in text("#send-hint"))
+    wait(lambda: "Press +" in text("#send-hint"))
     assert js("return document.querySelector('#send-hint').getAttribute('aria-live')") == "polite"
     assert js("return window.sendCalls") == 1
     assert js("return window.chooserCalls") == 2
