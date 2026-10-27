@@ -2,7 +2,9 @@
 
 Run `./tests/ui/run.sh` from the repository root. The existing Podman image (or
 `CONTAINER_ENGINE=docker`) checks fmt, Clippy, workspace tests and the real Tauri
-app under Xvfb/WebKitWebDriver against a separate CLI peer.
+app under Xvfb/WebKitWebDriver against a separate CLI peer. Tauri-driver creates
+the session; subsequent commands go directly to its native WebKitWebDriver port,
+avoiding intermediary pooled-connection resets without replaying clicks or keys.
 
 `regression.py` proves no automatic search before 30 seconds, no search over 31
 hidden seconds and preservation of device nodes after nonvisual address changes.

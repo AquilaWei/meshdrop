@@ -89,8 +89,9 @@ Android exit information and the emulator log when ADB is unavailable.
 
 The shared UI scenario shares completed receives from Recent and stops reception
 from the single-level Settings list. Unresolved addresses stay in backend/CLI diagnostics. Both runners first
-run six activity/focus parser tests. Runtime checks wait for initial boot broadcasts
-to settle, then require the share chooser to be both resumed and focused before
+run six activity/focus parser tests. Runtime checks wait for initial boot broadcasts and a stable GMS provider PID
+for 30 seconds before launching meshdrop (a fresh-image provider restart can kill
+its clients with Android DEPENDENCY DIED), then require the share chooser to be both resumed and focused before
 sending Back. They require MainActivity to regain focus with the same process ID
 and the original CDP connection; crashes are not hidden by relaunching the app.
 

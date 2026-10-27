@@ -121,6 +121,19 @@ with tempfile.TemporaryDirectory(prefix='meshdrop-android-') as temporary:
         # Fresh Google API images update system components through boot broadcasts.
         # Wait for those queued changes before launching the app or its chooser.
         adb('shell', 'am', 'wait-for-broadcast-idle', timeout=120)
+        # Broadcast idle can precede a first-boot GMS provider restart. Android
+        # kills clients of that fonts provider with DEPENDENCY DIED, even when
+        # the app is healthy. Settle the dependency before launching; never
+        # recover/relaunch meshdrop after a scenario has started.
+        provider_state = {'pid': None, 'since': time.monotonic()}
+        def provider_stable():
+            pid = adb('shell', 'pidof', 'com.google.android.gms.persistent').strip()
+            if pid != provider_state['pid']:
+                provider_state.update(pid=pid, since=time.monotonic())
+            return pid and time.monotonic() - provider_state['since'] >= 30
+        wait(provider_stable, 180)
+        print('Emulator GMS dependency stable for 30 seconds before app launch', flush=True)
+        adb('shell', 'am', 'wait-for-broadcast-idle', timeout=120)
         adb('logcat','-c')
         adb('shell','am','start','-a','android.intent.action.SEND','-n','org.meshdrop.fixture/.ShareActivity','-d','content://org.meshdrop.fixture/documents/one')
         sockets = wait(lambda: [line.split('@')[-1] for line in adb('shell','cat','/proc/net/unix').decode().splitlines() if 'webview_devtools_remote_' in line])
