@@ -100,11 +100,12 @@ with tempfile.TemporaryDirectory(prefix='meshdrop-android-') as temporary:
     (root/'avd').mkdir()
     (root/'android-user').mkdir()
     env = dict(os.environ, ANDROID_AVD_HOME=str(root/'avd'), ANDROID_USER_HOME=str(root/'android-user'))
+    emulator = None
     try:
         avdmanager = SDK/'cmdline-tools/latest/bin/avdmanager'
         subprocess.run([str(avdmanager), 'create', 'avd', '-n', 'meshdrop-test', '-k', os.environ.get('MESHDROP_ANDROID_IMAGE','system-images;android-34;google_apis;x86_64'), '--force', '--path', str(root/'avd/meshdrop-test.avd')], input=b'no\n', env=env, check=True, stdout=subprocess.PIPE, timeout=180)
         emulator_log = (root/'emulator.log').open('wb')
-        emulator = subprocess.Popen([os.environ.get('MESHDROP_EMULATOR', str(SDK/'emulator/emulator')), '-avd', 'meshdrop-test', '-port', '5580', '-no-window', '-no-audio', '-no-boot-anim', '-no-snapshot', '-gpu', os.environ.get('MESHDROP_EMULATOR_GPU', 'swangle'), '-feature', '-Vulkan', '-show-kernel', *(['-verbose', '-debug-init'] if os.environ.get('MESHDROP_EMULATOR_TRACE') == '1' else []), '-memory', '2048', '-cores', '2', '-accel', 'on'], env=env, stdout=emulator_log, stderr=subprocess.STDOUT)
+        emulator = subprocess.Popen([os.environ.get('MESHDROP_EMULATOR', str(SDK/'emulator/emulator')), '-avd', 'meshdrop-test', '-port', '5580', '-no-window', '-no-audio', '-no-boot-anim', '-no-snapshot', '-gpu', os.environ.get('MESHDROP_EMULATOR_GPU', 'swangle'), '-feature', '-Vulkan', '-show-kernel', *(['-verbose', '-debug-init'] if os.environ.get('MESHDROP_EMULATOR_TRACE') == '1' else []), '-memory', '2048', '-cores', '2', '-accel', 'on'], env=env, stdout=emulator_log, stderr=subprocess.STDOUT, start_new_session=True)
         processes.append(emulator)
         def booted():
             if emulator.poll() is not None:
@@ -259,6 +260,8 @@ with tempfile.TemporaryDirectory(prefix='meshdrop-android-') as temporary:
     finally:
         try:
             subprocess.run([ADB,'-s',SERIAL,'emu','kill'], capture_output=True, timeout=10)
+            if emulator is not None:
+                emulator.wait(timeout=10)
         except subprocess.TimeoutExpired:
             print('ADB emulator shutdown timed out; terminating owned process', flush=True)
         for process in reversed(processes):
