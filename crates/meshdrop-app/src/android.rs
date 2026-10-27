@@ -100,7 +100,7 @@ pub async fn request(
                         .run_mobile_plugin("pick", json!({}))
                         .map_err(|e| e.to_string())?;
                     return tauri::async_runtime::block_on(
-                        controller.call("select_files", value["paths"].clone()),
+                        controller.call("append_files", value["paths"].clone()),
                     );
                 }
                 _ => unreachable!(),

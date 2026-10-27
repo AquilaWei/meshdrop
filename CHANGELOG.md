@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.1.7 - 2026-10-27
+
+PATCH test build; physical-device transfer acceptance is pending.
+
+- Search at launch, on refresh and every 30 seconds in the visible foreground; keep Android receiving in the background.
+- Reduce idle work by retaining unchanged device tiles and QR codes.
+- Pair first, add files through ＋ over several picks, then send all selected files in one invitation. Empty selections show an accessible hint.
+- Replace grouped Settings with one list; keep port, network restrictions and timeouts in config.toml.
+- Show readable file sizes and place the 44px cancel control clear of the progress ring.
+
 ## 0.1.6 - 2026-10-24
 
 PATCH test build; physical-device acceptance is pending.

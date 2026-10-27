@@ -115,7 +115,8 @@ fmt, clippy and tests on Ubuntu, Windows and macOS, plus an Android debug APK
 build job. All four hosted jobs have passed on the public
 [AquilaWei/meshdrop repository](https://github.com/AquilaWei/meshdrop).
 
-The Xvfb/WebDriver suite drives nine desktop scenarios against real CLI peers.
+The Xvfb/WebDriver suite covers discovery timing, stable rendering and the complete
+connect → choose → send flow against real CLI peers.
 Its chooser-result injection and native UI limits are documented in
 [tests/ui/README.md](tests/ui/README.md). Wine also checks the Windows app target;
 WebView2 UI execution requires native Windows.
@@ -143,31 +144,44 @@ folder and cannot bind the same port simultaneously.
 
 ![meshdrop main screen with an active send](docs/screenshot-main.png)
 
-The shared desktop/Android main page shows nearby device avatars, file chips and
-collapsible **Recent** transfers. Search starts automatically; the refresh icon
-spins while searching and background discovery keeps the grid current. Only reachable devices with a successful meshdrop certificate
-probe appear. Failed probes, unresolved addresses and offline/non-meshdrop
-Tailscale peers appear only in **Settings → Advanced → Diagnostics**. Discovery never grants trust.
+The shared desktop/Android main page shows nearby device avatars, selected files
+and collapsible **Recent** transfers. Search runs once at launch, when you press
+**↻**, and every **30 seconds** while the app is visible and in the foreground.
+Hidden/background apps pause searches; Android continues receiving. Unchanged
+snapshots preserve the device grid and skip QR redraws. Only reachable devices
+with a successful meshdrop certificate probe appear. Discovery never grants trust.
 
-**Tap a device to send immediately.** With no files selected, the chooser opens
-first and sending continues after selection. Tap other devices in sequence to
-start independent transfers; each has its own status and cancellation.
-For an unpaired device, compare the six-digit code on both devices and confirm on
-both sides; the file invitation follows automatically. Paired devices skip that
-prompt. Changed fingerprints are refused. Each target shows waiting, progress,
-completion, rejection, timeout or failure; active transfers have **Cancel**.
-Incoming pairing and file invitations open modal dialogs and require a decision.
-Completed receives show each file’s saved location. Device names and filenames render as text.
+**Connect first, then press ＋ to choose files, then tap the connected device to send.**
+Tapping an unpaired avatar only opens the pairing confirmation. Compare the
+six-digit code on both devices and confirm on both sides; the avatar then shows
+**Connected**. Pairing does not send files. The bottom **＋** is the only in-app
+file picker: add files over several picks and remove any file chip. Tapping a
+connected avatar sends all selected files in **one invitation**. With no files,
+it announces “Press ＋ to choose files first.” Fingerprint mismatches disable the
+avatar. Incoming invitations still require an explicit decision.
 
-**Settings** groups My Device, Add Device, Receiving, Network and Advanced.
-Use the paperclip to choose files, remove individual file chips, or drag files
-into the desktop window. Recent shows saved locations, with desktop reveal-in-folder
-and Android sharing controls. Android QR scanning lives in Add Device; received
-files and Stop receiving live in Receiving. Background Android notifications retain their existing behavior.
-Settings are saved atomically to the shared `config.toml`; unknown keys include the
-file path in the error. `notifications_enabled` toggles desktop notifications
-immediately. Restart after changing the receive folder, port, providers, networks
-or either timeout. Closing the app stops its background receiver.
+Each transfer shows progress and its result. Active avatars have a separate
+44px **Cancel** target below the avatar and progress ring. Invitation sizes use
+readable units such as **2.4 MB**. Recent shows saved locations, desktop
+reveal-in-folder and Android sharing controls. Device names and filenames render
+as text. Desktop drag/drop no longer selects files; use **＋**.
+
+**Settings** is one flat list: device name, QR and fingerprint; Add Device (with
+Android QR scanning); discovery provider checkboxes; notifications; receive folder
+(with a desktop open button, or **Download** on Android); Android **Stop receiving**.
+Name, receive folder and providers are marked **restart required**. Notification
+changes apply immediately after saving. Android received-file sharing is in Recent.
+Settings are saved atomically to the shared `config.toml`.
+
+**Advanced settings are edited by hand.** Close the app, open `config.toml` in the
+platform config directory listed above, edit `port`, `allowed_networks`,
+`invitation_timeout_seconds` or `idle_timeout_seconds`, save, and restart. The
+example in Configuration shows their unchanged defaults. Keep the existing keys;
+unknown keys or invalid values produce an error with the filename. The built-in
+TOML editor and diagnostics panel have been removed. To inspect discovery
+failures, run `cargo run --bin meshdrop -- devices` with the same `--state-dir` or
+`--config`; provider diagnostics are printed on stderr. The editor and diagnostics
+are tools/views, not new TOML keys. Closing the desktop app stops its receiver.
 
 On Linux, launch `./target/debug/meshdrop-app`; on Windows, launch
 `target\debug\meshdrop-app.exe` (WebView2 must be installed). On macOS, run
@@ -191,8 +205,7 @@ On **Android 10+ (API 29+)**, verified files are streamed into the public
 copy finishes and are deleted on copy failure. New entries and collision renaming
 preserve existing files. No broad storage permission is requested. The completion
 view shows the Download name and content URI. A verified private copy is retained
-for the received-files list; **Settings → Receiving → Refresh received files → Share** shares the
-public entry with a temporary read grant.
+for the received-files list; **Recent → Share** shares the public entry with a temporary read grant.
 
 On **Android 9 and below**, receives remain in app-private storage; uninstalling
 the app deletes them. Sharing exposes only completed receive files through

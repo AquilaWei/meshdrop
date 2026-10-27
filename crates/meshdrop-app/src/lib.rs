@@ -30,7 +30,7 @@ async fn desktop_request(
                 .into_iter()
                 .map(|path| path.into_path().map_err(|e| e.to_string()))
                 .collect::<Result<Vec<_>, _>>()?;
-            return state.call("select_files", serde_json::json!(paths)).await;
+            return state.call("append_files", serde_json::json!(paths)).await;
         }
         return Ok(serde_json::Value::Null);
     }

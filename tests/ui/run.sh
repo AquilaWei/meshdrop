@@ -9,6 +9,6 @@ tar --exclude=build --exclude=.gradle --exclude=.kotlin --exclude=.tauri --exclu
 "$engine" start -a "$container"
 status=$("$engine" inspect --format '{{.State.ExitCode}}' "$container")
 if [[ "$status" == 0 ]]; then
-  "$engine" cp "$container:/tmp/meshdrop-016-screens" /tmp/
+  "$engine" cp "$container:/tmp/meshdrop-017-screens" /tmp/
 fi
 exit "$status"

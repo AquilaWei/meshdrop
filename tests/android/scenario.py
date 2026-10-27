@@ -113,9 +113,9 @@ with tempfile.TemporaryDirectory(prefix='meshdrop-android-') as temporary:
         wait(booted, 600)
         adb('shell','input','keyevent','82')
         apk = Path(os.environ.get('MESHDROP_ANDROID_APK', 'crates/meshdrop-app/gen/android/app/build/outputs/apk/universal/debug/app-universal-debug.apk'))
-        adb('install','-r',str(apk))
+        adb('install','-r',str(apk), timeout=120)
         fixture = os.environ.get('MESHDROP_SHARE_FIXTURE', 'tests/android/share-fixture/build/outputs/apk/debug/meshdrop-share-fixture-debug.apk')
-        adb('install', '-r', fixture)
+        adb('install', '-r', fixture, timeout=120)
         adb('shell','pm','grant',PACKAGE,'android.permission.POST_NOTIFICATIONS')
         adb('forward','tcp:19843','tcp:9843')
         # Fresh Google API images update system components through boot broadcasts.
@@ -176,13 +176,10 @@ with tempfile.TemporaryDirectory(prefix='meshdrop-android-') as temporary:
         collision = adb('exec-out', 'cat', '/sdcard/Download/linux-to-android (1).txt')
         assert collision == b'second collision payload\n', repr(collision)
         print('PASS: public Download collision preserves both files', flush=True)
-        cdp.click('#show-more')
-        cdp.click('[data-settings=receiving]')
-        cdp.click('#received-refresh')
-        wait(lambda: source.name in cdp.text('#received-files'))
+        wait(lambda: source.name in cdp.text('#transfers'))
         app_pid = adb('shell', 'pidof', PACKAGE).strip()
         assert app_pid, 'App must be alive before sharing'
-        cdp.click('#received-files button')
+        cdp.click('#transfers .transfer .icon-button')
         # A queued chooser intent is visible before it owns focus. Back sent then
         # can finish MainActivity instead, terminating Tauri and its CDP socket.
         wait(lambda: (current_activity() or '').endswith('.ChooserActivity'))
@@ -195,11 +192,9 @@ with tempfile.TemporaryDirectory(prefix='meshdrop-android-') as temporary:
         cdp.call('add_device', {'address':'10.0.2.2:19844'}); cdp.call('refresh'); cdp.evaluate('poll()')
         wait(lambda: 'Paired' in cdp.text('#devices'))
         cdp.call('add_device', {'address':'127.0.0.1:1'}); cdp.call('refresh'); cdp.evaluate('poll()')
-        wait(lambda: '127.0.0.1:1' in cdp.text('#problems'))
+        assert any('127.0.0.1:1' in problem['error'] for problem in cdp.call('snapshot')['problems'])
         assert '127.0.0.1:1' not in cdp.text('#devices')
-        print('PASS: unresolved candidate stays in Settings diagnostics', flush=True)
-        cdp.click('#show-send')
-        cdp.click('#show-send')
+        print('PASS: unresolved candidate stays in backend diagnostics', flush=True)
         cdp.click('#devices button:not(:disabled)')
         wait(lambda: (received/'shared-one.txt').exists())
         assert (received/'shared-one.txt').read_bytes() == b'Shared content one\n'
@@ -221,7 +216,12 @@ with tempfile.TemporaryDirectory(prefix='meshdrop-android-') as temporary:
         assert 'rejected.txt' not in adb('shell','ls','-A','/sdcard/Download').decode()
         assert '.part' not in adb('shell','ls','-A','/sdcard/Download').decode()
         print('PASS: rejected invitation writes no content', flush=True)
+        cdp.evaluate("window.backgroundSearches=0; window.backgroundAct=act; act=(op,payload)=>{if(op==='refresh')window.backgroundSearches++;return backgroundAct(op,payload)}")
         adb('shell','input','keyevent','3')
+        wait(lambda: cdp.evaluate('document.hidden'))
+        time.sleep(31)
+        assert cdp.evaluate('window.backgroundSearches') == 0
+        print('PASS: no discovery during 31 seconds in the Android background', flush=True)
         sender = subprocess.Popen(['target/debug/meshdrop','--state-dir',str(cli),'send','127.0.0.1:19843',str(rejected)], stdout=send_log, stderr=send_log)
         processes.append(sender)
         wait(lambda: cdp.call('snapshot')['invitations'])
@@ -230,11 +230,10 @@ with tempfile.TemporaryDirectory(prefix='meshdrop-android-') as temporary:
         assert sender.wait(timeout=30) != 0
         print('PASS: background reception retains explicit user decision', flush=True)
         cdp.click('#show-more')
-        cdp.click('[data-settings=receiving]')
         cdp.click('#stop-receiver')
         wait(lambda: 'isForeground=true' not in adb('shell','dumpsys','activity','services',PACKAGE).decode())
         print('PASS: stop receiving action stops foreground service', flush=True)
-        print('12 Android scenarios passed; 0 failed', flush=True)
+        print('13 Android scenarios passed; 0 failed', flush=True)
     except Exception:
         try:
             print(adb('logcat','-b','crash','-d').decode(errors='replace'), flush=True)

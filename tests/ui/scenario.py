@@ -1,5 +1,6 @@
 """Real Tauri WebDriver and a separate meshdrop CLI process."""
 import hashlib
+from http.client import RemoteDisconnected
 import json
 import os
 from pathlib import Path
@@ -19,8 +20,18 @@ processes = []
 def http(method, path, body=None):
     data = None if body is None else json.dumps(body).encode()
     request = urllib.request.Request(BASE + path, data=data, method=method, headers={"Content-Type": "application/json"})
-    with urllib.request.urlopen(request, timeout=30) as response:
-        value = json.load(response)["value"]
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            value = json.load(response)["value"]
+    except RemoteDisconnected:
+        # WebKitWebDriver occasionally closes a pooled HTTP connection. Retry
+        # read-only observations only; never replay a click, key or command.
+        read_only = method == "GET" or (path.endswith('/execute/sync') and body['script'].startswith('return '))
+        if not read_only:
+            raise
+        print(f"WebDriver connection closed during read: {path}; retrying observation", flush=True)
+        with urllib.request.urlopen(request, timeout=30) as response:
+            value = json.load(response)["value"]
     if isinstance(value, dict) and "error" in value:
         raise RuntimeError(value)
     return value
@@ -52,7 +63,13 @@ def click(selector):
 def fill(selector, value):
     node = http("POST", f"/session/{session}/element", {"using": "css selector", "value": selector})
     http("POST", f"/session/{session}/element/{node[ELEMENT]}/clear", {})
-    http("POST", f"/session/{session}/element/{node[ELEMENT]}/value", {"text": value})
+    try:
+        http("POST", f"/session/{session}/element/{node[ELEMENT]}/value", {"text": value})
+    except RemoteDisconnected:
+        # The remote may have applied the text before closing its response.
+        # Verify the resulting value instead of replaying native key input.
+        wait(lambda: js('return document.querySelector(arguments[0]).value', [selector]) == value)
+        print(f"WebDriver text response closed; verified completed value for {selector}", flush=True)
 
 
 def text(selector):
@@ -126,44 +143,72 @@ def main(root):
 
     assert js("return document.querySelector('#more-page').hidden")
     click("#show-more")
-    click("[data-settings=add]")
     fill("#address", "127.0.0.1:1")
     click("#manual button")
-    wait(lambda: "127.0.0.1:1" in text("#problems"))
+    wait(lambda: "Added." in text("#add-status"))
+    click("#show-send")
+    click("#refresh")
+    wait(lambda: js("return !refreshing"))
+    js("window.probeState=null; request('snapshot').then(value=>window.probeState=value); return true")
+    wait(lambda: js("return window.probeState !== null"))
+    assert js("return probeState.problems.some(item=>item.error.includes('127.0.0.1:1'))")
     assert "127.0.0.1:1" not in text("#devices")
-    click("#show-send")
-    click("#show-send")
-    print("PASS: unresolved/non-meshdrop candidate is diagnostic only", flush=True)
+    print("PASS: unresolved candidate stays out of the grid; diagnostics remain in the backend", flush=True)
 
     # WebDriver controls the webview, not native GTK chooser windows. Inject only
     # the chooser's result through the same existing Rust command used by the
     # dialog callback. Transport, state, UI rendering and filesystem remain real.
     source = root / "payload <img src=x onerror=alert(1)>.txt"
     source.write_bytes(b"meshdrop ui payload\n" * 131072)
-    # Supply only the native chooser result; tapping with no selection must ask
-    # for files and then continue to pairing without another device/send click.
-    js("""const original = act;
-        const chooserPath = arguments[0];
-        window.chooserCalls = 0;
+    second_source = root / "second.txt"
+    second_source.write_text("second selected file")
+    js("""window.realAct = act;
+        window.chooserPaths = [arguments[0]];
+        window.chooserCalls = 0; window.sendCalls = 0;
         act = (operation, payload) => {
             if (operation === 'pick_files') {
                 window.chooserCalls++;
-                return original('select_files', [chooserPath]);
+                return realAct('append_files', chooserPaths);
             }
-            return original(operation, payload);
+            if (operation === 'send') window.sendCalls++;
+            return realAct(operation, payload);
         }; return true;""", [str(source)])
     click("#devices button:not(:disabled)")
+    wait(lambda: js("return document.querySelector('#outgoing-pair').open"))
+    assert js("return window.chooserCalls") == 0
+    assert js("return window.sendCalls") == 0
+    assert js("return chosenFiles.length") == 0
+    click("#pair-dismiss")
+    print("PASS: unpaired avatar with no files only starts pairing; no picker or invite", flush=True)
+    click("#pick-files")
     wait(lambda: source.name in text("#selected-files"))
-    assert js("return window.chooserCalls") == 1
+    js("window.chooserPaths=[arguments[0]]; return true", [str(second_source)])
+    click("#pick-files")
+    wait(lambda: second_source.name in text("#selected-files"))
+    assert js("return chosenFiles.length") == 2
+    assert js("return window.chooserCalls") == 2
+    print("PASS: plus is the picker entry and separate picks accumulate files", flush=True)
+    click("#devices button:not(:disabled)")
     wait(lambda: js("return document.querySelector('#outgoing-pair').open"))
     code = text("#pair-code")
     assert re.fullmatch(r"\d{6}", code)
     click("#pair-confirm")
     wait(lambda: code in (root / "cli.log").read_text())
     receiver.stdin.write(b"y\n"); receiver.stdin.flush()
+    wait(lambda: not js("return document.querySelector('#outgoing-pair').open"))
+    wait(lambda: "Connected" in text("#devices"))
+    assert js("return window.sendCalls") == 0
+    assert js("return currentTransfers.length") == 0
+    assert js("return window.chooserCalls") == 2
+    print("PASS: unpaired avatar with selected files pairs and becomes connected without inviting", flush=True)
+    click("#devices button:not(:disabled)")
     wait(lambda: "Complete" in text("#transfers"))
-    assert not js("return document.querySelector('#outgoing-pair').open")
-    print("PASS: tapping an unpaired device pairs with matching codes then automatically invites", flush=True)
+    assert js("return window.sendCalls") == 1
+    assert js("return currentTransfers.length") == 1
+    assert js("return currentTransfers[0].files.length") == 2
+    wait(lambda: (cli_received / second_source.name).exists())
+    assert digest(second_source) == digest(cli_received / second_source.name)
+    print("PASS: multiple files produce exactly one invite and both arrive with matching hashes", flush=True)
     wait(lambda: (cli_received / "payload _img src=x onerror=alert(1)_.txt").exists())
     assert digest(source) == digest(cli_received / "payload _img src=x onerror=alert(1)_.txt")
     assert js("return [...document.querySelectorAll('#transfers progress')].some(p => p.value === 100)")
@@ -172,12 +217,35 @@ def main(root):
     wait(lambda: js("return window.knownPath") == str(source))
     print("PASS: injected chooser result, app-to-CLI send, recorded reveal path, 100% progress and SHA-256", flush=True)
 
-    wait(lambda: "Paired" in text("#devices"))
+    click("#selected-files button")
+    wait(lambda: js("return chosenFiles.length === 1"))
+    assert second_source.name in text("#selected-files")
+    click("#selected-files button")
+    wait(lambda: js("return chosenFiles.length === 0"))
+    print("PASS: each selected file can be removed independently", flush=True)
+    click("#devices button:not(:disabled)")
+    wait(lambda: "Press ＋" in text("#send-hint"))
+    assert js("return document.querySelector('#send-hint').getAttribute('aria-live')") == "polite"
+    assert js("return window.sendCalls") == 1
+    assert js("return window.chooserCalls") == 2
+    assert not js("return document.querySelector('#outgoing-pair').open")
+    print("PASS: paired avatar without files announces the plus-first hint; no picker or invite", flush=True)
+    js("window.chooserPaths=[arguments[0]]; return true", [str(source)])
+    click("#pick-files")
+    wait(lambda: js("return chosenFiles.length === 1"))
     click("#devices button:not(:disabled)")
     wait(lambda: js("return document.querySelectorAll('#transfers .transfer').length === 2"))
+    assert js("return window.sendCalls") == 2
     assert not js("return document.querySelector('#outgoing-pair').open")
     wait(lambda: js("return [...document.querySelectorAll('.transfer-status')].filter(n => n.textContent === 'Complete').length === 2"))
-    print("PASS: tapping an already paired target sends again without a code prompt", flush=True)
+    print("PASS: paired avatar with files sends without a code prompt or another picker", flush=True)
+    js("window.realDevices=[...deviceItems.values()]; devices([{...realDevices[0],mismatch:true}]); return true")
+    assert js("return document.querySelector('#devices .device').disabled")
+    js("document.querySelector('#devices .device').click(); return true")
+    assert js("return window.sendCalls") == 2
+    assert js("return window.chooserCalls") == 3
+    js("devices(realDevices); return true")
+    print("PASS: fingerprint mismatch disables avatar activation", flush=True)
 
     incoming_target = next(iter(json.loads((cli_dir / "trust.json").read_text())))
     incoming = root / "from-cli.txt"; incoming.write_bytes(b"CLI to desktop\n" * 8192)
@@ -207,24 +275,20 @@ def main(root):
     print("PASS: malicious device names and filenames display as text", flush=True)
 
     click("#show-more")
-    click("[data-settings=advanced]")
-    js("document.querySelector('#settings-toml').closest('details').open = true; return true")
-    fill("#settings-toml", "prot = 1234")
-    click("#save-toml")
+    assert not js("return document.querySelector('[data-settings], #setting-port, #setting-networks, #setting-invitation, #setting-idle, #settings-toml, #problems')")
+    assert not js("return document.querySelector('#settings-content').hidden")
+    assert js("return [...document.querySelectorAll('[name=provider]')].length") == 4
+    assert "restart required" in text("#settings-form")
+    js("window.tomlError=null; act('save_settings',{toml:'prot = 1234'}).catch(error=>window.tomlError=String(error)); return true")
     wait(lambda: "config.toml" in text("#error") and "prot" in text("#error"))
     assert "port = 19843" in (app_dir / "config.toml").read_text()
-    print("PASS: invalid TOML reports path and preserves saved settings", flush=True)
-    click("#show-send")
-    assert text("#settings-title") == "Settings"
-    click("[data-settings=receiving]")
-    assert text("#settings-title") == "Receiving"
-    fill("#setting-port", "19843")
-    click("#settings-form button")
+    print("PASS: config-only validation preserves saved configuration", flush=True)
+    fill("#setting-folder", str(app_received))
+    click("#settings-form button:not(#open-folder)")
     wait(lambda: "Saved." in text("#settings-status"))
     assert "port = 19843" in (app_dir / "config.toml").read_text()
     click("#show-send")
-    click("#show-send")
-    print("PASS: Settings level navigation, back and save", flush=True)
+    print("PASS: single-level Settings exposes approved controls and preserves config-only values", flush=True)
     # Native WebDriver key input exercises keyboard activation and modal Escape.
     js("document.querySelector('#show-more').focus(); return true")
     http("POST", f"/session/{session}/actions", {"actions":[{"type":"key","id":"keyboard","actions":[{"type":"keyDown","value":"\ue007"},{"type":"keyUp","value":"\ue007"}]}]})
@@ -245,10 +309,10 @@ def main(root):
     assert js("return chosenFiles.length") == 0
     print("PASS: remove one selected file", flush=True)
     js("window.__TAURI__.event.emit('tauri://drag-drop',{paths:[arguments[0]]}); return true", [str(source)])
-    wait(lambda: source.name in text("#selected-files"))
-    assert js("return chosenFiles.length") == 1
-    print("PASS: native Tauri drag-drop event selects files", flush=True)
-    print("16 UI scenarios passed; 0 failed", flush=True)
+    time.sleep(0.4)
+    assert js("return chosenFiles.length") == 0
+    print("PASS: drag-drop cannot bypass the plus-only picker flow", flush=True)
+    print("21 UI scenarios passed; 0 failed", flush=True)
 
 
 if __name__ == "__main__":

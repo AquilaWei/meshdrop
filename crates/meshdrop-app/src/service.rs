@@ -175,6 +175,14 @@ impl Actor {
                             self.session.config.notifications_enabled = value["config"]["notifications_enabled"].as_bool().unwrap_or(true);
                             self.view["restart_required"] = json!(true);
                         }
+                        if job.operation == "confirm_pair" && let Ok(value) = &job.result {
+                            for device in self.view["devices"].as_array_mut().expect("devices") {
+                                if device["fingerprint"] == value["fingerprint"] && device["addresses"].as_array().is_some_and(|addresses| addresses.contains(&value["address"])) {
+                                    device["paired"] = json!(true);
+                                    device["target"] = value["address"].clone();
+                                }
+                            }
+                        }
                         if let Some(id) = job.operation.strip_prefix("send:") { self.sent(id, &job.result); }
                         if let Ok(value) = &job.result && job.operation == "refresh" {
                             self.view["devices"] = value["devices"].clone();
@@ -235,8 +243,13 @@ impl Actor {
         } = request;
         let immediate = match operation.as_str() {
             "snapshot" => Some(self.snapshot()),
-            "select_files" => Some((|| {
-                self.selected_files = serde_json::from_value(payload.clone())?;
+            "select_files" | "append_files" => Some((|| {
+                let paths: Vec<PathBuf> = serde_json::from_value(payload.clone())?;
+                if operation == "append_files" {
+                    self.selected_files.extend(paths);
+                } else {
+                    self.selected_files = paths;
+                }
                 self.view["selected_files"] = json!(
                     self.selected_files
                         .iter()
@@ -477,24 +490,28 @@ impl Actor {
         }
         Ok(json!(ids))
     }
-    fn snapshot(&self) -> Result<Value> {
+    fn snapshot(&mut self) -> Result<Value> {
+        let address = advertised_address(self.session.port)?;
+        let payload = meshdrop_core::discovery::qr(&address, &self.session.identity.fingerprint());
+        // QR encoding dominated unchanged snapshots. Regenerate only on address
+        // changes so switching networks still updates the advertised QR.
+        if self.view["qr_content"].as_str() != Some(&payload) {
+            let qr = qrcode::QrCode::new(payload.as_bytes())?;
+            let matrix: Vec<Vec<bool>> = (0..qr.width())
+                .map(|y| {
+                    (0..qr.width())
+                        .map(|x| qr[(x, y)] == qrcode::Color::Dark)
+                        .collect()
+                })
+                .collect();
+            self.view["qr"] = json!(matrix);
+            self.view["qr_content"] = json!(payload);
+        }
         let mut view = self.view.clone();
         view["platform"] = json!(std::env::consts::OS);
         view["name"] = json!(self.session.config.name);
         view["fingerprint"] = json!(self.session.identity.fingerprint());
         view["port"] = json!(self.session.port);
-        let address = advertised_address(self.session.port)?;
-        let payload = meshdrop_core::discovery::qr(&address, &self.session.identity.fingerprint());
-        let qr = qrcode::QrCode::new(payload.as_bytes())?;
-        let matrix: Vec<Vec<bool>> = (0..qr.width())
-            .map(|y| {
-                (0..qr.width())
-                    .map(|x| qr[(x, y)] == qrcode::Color::Dark)
-                    .collect()
-            })
-            .collect();
-        view["qr"] = json!(matrix);
-        view["qr_content"] = json!(payload);
         Ok(view)
     }
 }
@@ -692,11 +709,13 @@ impl Session {
                     .pair(&local_address(&address, self.port).await?)
                     .await?;
                 let path = self.directory.join("trust.json");
+                let stored_address = address.clone();
+                let stored_pin = pin.clone();
                 tokio::task::spawn_blocking(move || {
-                    TrustStore::load(&path)?.remember(&path, &address, &pin)
+                    TrustStore::load(&path)?.remember(&path, &stored_address, &stored_pin)
                 })
                 .await??;
-                Ok(json!({"status":"paired"}))
+                Ok(json!({"status":"paired", "address":address, "fingerprint":pin}))
             }
             _ => bail!("unknown desktop command {operation}"),
         }
@@ -832,6 +851,41 @@ mod tests {
             .await
             .unwrap();
         (directory, controller, rx)
+    }
+    #[tokio::test]
+    #[ignore = "manual snapshot and QR generation profiling"]
+    async fn profile_unchanged_snapshots() {
+        let (_directory, controller, _notices) = profile("Profile", "[]").await;
+        let snapshot = controller.call("snapshot", Value::Null).await.unwrap();
+        let start = std::time::Instant::now();
+        for _ in 0..100 {
+            controller.call("snapshot", Value::Null).await.unwrap();
+        }
+        eprintln!("PROFILE 100 actor snapshots: {:?}", start.elapsed());
+        let payload = snapshot["qr_content"].as_str().unwrap();
+        let start = std::time::Instant::now();
+        for _ in 0..100 {
+            std::hint::black_box(qrcode::QrCode::new(payload.as_bytes()).unwrap());
+        }
+        eprintln!("PROFILE 100 QR encodings: {:?}", start.elapsed());
+        controller.shutdown().await;
+    }
+    #[tokio::test]
+    async fn separate_file_picks_append_to_the_selection() {
+        let (_directory, controller, _notices) = profile("Files", "[]").await;
+        controller
+            .call("append_files", json!(["/tmp/first.txt"]))
+            .await
+            .unwrap();
+        controller
+            .call("append_files", json!(["/tmp/second.txt"]))
+            .await
+            .unwrap();
+        assert_eq!(
+            controller.call("snapshot", Value::Null).await.unwrap()["selected_files"],
+            json!(["first.txt", "second.txt"])
+        );
+        controller.shutdown().await;
     }
     #[tokio::test]
     async fn removing_one_file_preserves_the_other_selection() {
@@ -1164,6 +1218,11 @@ mod tests {
         let (a, first, _notices_a) = profile("First", "[]").await;
         let (b, second, mut notices_b) = profile("Second", "[]").await;
         let target = address(&second).await;
+        first
+            .call("add_device", json!({"address":target}))
+            .await
+            .unwrap();
+        first.call("refresh", Value::Null).await.unwrap();
         let prepared = first
             .call("prepare_pair", json!({"address":target}))
             .await
@@ -1183,6 +1242,10 @@ mod tests {
             .await
             .unwrap();
         pairing.await.unwrap().unwrap();
+        assert_eq!(
+            first.call("snapshot", Value::Null).await.unwrap()["devices"][0]["paired"],
+            true
+        );
         assert_eq!(
             meshdrop_core::identity::TrustStore::load(&a.path().join("trust.json"))
                 .unwrap()
