@@ -78,9 +78,8 @@ The release workflow runs full desktop/Android CI, builds the three installers,
 launches the RPM under Xvfb and the mounted DMG on macOS, verifies APK metadata
 and signature, then creates `SHA256SUMS`. Release notes are extracted from the
 matching CHANGELOG section. A manual `gh workflow run release.yml --ref master`
-is a dry run and cannot create a Release. ARM64 APK emulator launch acceptance
-runs locally using the private `tests/android` AVD infrastructure; hosted x86_64
-Linux runners only verify the arm64 APK metadata and signature.
+is a dry run and cannot create a Release. ARM64 APK launch checks use a private Android 34 Google APIs x86_64 AVD with
+ARM64 native translation, both locally and on CI. No existing user AVD is used.
 
 ## Try it
 

@@ -144,7 +144,8 @@ physical transfer checks. No 0.2.0 tag or release is authorized by this patch.
   Gatekeeper approval, native notifications and file pickers remain physical checks.
 - Verify the release-signed arm64 APK using aapt and apksigner, then install and
   launch it on an isolated test emulator using `tests/android` infrastructure.
-  Hosted x86_64 Linux does not execute the arm64 APK. Never use the user's AVD or phone.
+  The Google APIs x86_64 image supplies ARM64 native translation; the same smoke
+  check runs on hosted Linux. Never use the user's AVD or phone.
 - Check the manual release workflow and all four ordinary push jobs at final HEAD.
   The dry run must not create a Release. No tag or publication is authorized here.
 - Test upgrading release APKs with the same key separately; moving from debug to

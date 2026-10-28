@@ -138,10 +138,15 @@ jobs:
         run: |
           args=()
           if [[ "$EVENT" == workflow_dispatch ]]; then args+=(--dry-run); fi
-          python3 scripts/packaging/release.py collect apk crates/meshdrop-app/gen/android/app/build/outputs/apk installers "${args[@]}"
+          python3 scripts/packaging/release.py collect apk crates/meshdrop-app/gen/android/app/build/outputs/apk/universal/release installers "${args[@]}"
           bash scripts/packaging/check-apk.sh installers/*.apk
-      - name: Record Android launch limitation
-        run: echo 'ARM64 APK verified by aapt and apksigner. Hosted x86_64 Linux cannot run an ARM64 Android AVD; emulator install/launch acceptance is required separately.' >> "$GITHUB_STEP_SUMMARY"
+      - name: Install emulator with ARM64 translation
+        run: |
+          sdkmanager 'emulator' 'system-images;android-34;google_apis;x86_64'
+          sudo chmod a+rw /dev/kvm
+      - name: Install and launch release APK in private test AVD
+        timeout-minutes: 15
+        run: python3 tests/android/release_smoke.py installers/*.apk
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: android-installer
