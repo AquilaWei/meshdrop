@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.0 - 2026-10-27
+
+- Add Linux x86_64 RPM, universal macOS DMG and release-signed Android arm64 APK installers.
+- Verify packaged app startup and publish checksums with installer downloads through a gated release workflow.
+- Document checksum verification, macOS Gatekeeper approval and Android debug-to-release migration.
+- Keep manual release checks unpublished and clearly label their temporary-key installers as not for distribution.
+
 ## 0.1.7 - 2026-10-27
 
 PATCH test build; physical-device transfer acceptance is pending.

@@ -1,5 +1,9 @@
 # meshdrop
 
+![Version](https://img.shields.io/badge/version-0.2.0-blue)
+
+Current version: **0.2.0**.
+
 **Private-network file invitations for Linux, Windows, macOS and Android.** No cloud,
 public CA or Tailscale account required. The Rust core is shared by the CLI and
 Tauri desktop and Android apps. GPL-3.0-or-later; see [LICENSE](LICENSE).
