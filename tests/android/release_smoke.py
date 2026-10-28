@@ -18,6 +18,16 @@ def adb(*arguments, timeout=30):
     return subprocess.check_output([ADB, '-s', SERIAL, *arguments], timeout=timeout)
 
 
+def provider_pid():
+    """A provider absent during first boot is transient; ADB failures still fail."""
+    try:
+        return adb('shell', 'pidof', 'com.google.android.gms.persistent').strip()
+    except subprocess.CalledProcessError as error:
+        if error.returncode != 1:
+            raise
+        return b''
+
+
 def wait(check, seconds=180):
     deadline = time.monotonic() + seconds
     while time.monotonic() < deadline:
@@ -56,13 +66,14 @@ def launch(apk):
                 wait(booted, 600)
                 print('Guest ABI list:', adb('shell', 'getprop', 'ro.product.cpu.abilist').decode().strip(), flush=True)
                 print('Native bridge:', adb('shell', 'getprop', 'ro.dalvik.vm.native.bridge').decode().strip(), flush=True)
+                adb('shell', 'input', 'keyevent', '82')
                 print(adb('install', str(apk), timeout=180).decode(), flush=True)
                 adb('shell', 'pm', 'grant', PACKAGE, 'android.permission.POST_NOTIFICATIONS')
                 adb('shell', 'am', 'wait-for-broadcast-idle', timeout=120)
                 # Fresh GMS provider restarts can kill dependent apps; settle it first.
                 state = {'pid': None, 'since': time.monotonic()}
                 def stable():
-                    pid = adb('shell', 'pidof', 'com.google.android.gms.persistent').strip()
+                    pid = provider_pid()
                     if pid != state['pid']:
                         state.update(pid=pid, since=time.monotonic())
                     return pid and time.monotonic() - state['since'] >= 30
