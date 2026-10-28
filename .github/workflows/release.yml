@@ -41,7 +41,7 @@ jobs:
         with:
           targets: x86_64-unknown-linux-gnu
       - name: Install build and launch dependencies
-        run: sudo apt-get update && sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev rpm cpio xvfb x11-utils dbus-x11
+        run: sudo apt-get update && sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev rpm libarchive-tools xvfb x11-utils dbus-x11
       - run: cargo install tauri-cli --locked --version 2.11.4
       - name: Build x86_64 RPM only
         working-directory: crates/meshdrop-app
@@ -59,9 +59,7 @@ jobs:
           rpm -qp --qf '%{NAME} %{VERSION} %{ARCH}\n' installers/*.rpm
           test "$(rpm -qp --qf '%{ARCH}' installers/*.rpm)" = x86_64
           test "$(rpm -qp --qf '%{VERSION}' installers/*.rpm)" = "$(python3 scripts/packaging/release.py version)"
-          mkdir extracted
-          rpm2cpio installers/*.rpm | (cd extracted && cpio -idm)
-          xvfb-run -a dbus-run-session -- python3 scripts/packaging/launch.py extracted/usr/bin/meshdrop-app
+          bash scripts/packaging/check-rpm.sh installers/*.rpm
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: linux-installer
@@ -96,7 +94,7 @@ jobs:
           app="$mountpoint/meshdrop.app"
           test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app/Contents/Info.plist")" = org.meshdrop.desktop
           test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Contents/Info.plist")" = "$(python3 scripts/packaging/release.py version)"
-          lipo -verify_arch arm64 x86_64 "$app/Contents/MacOS/meshdrop-app"
+          lipo "$app/Contents/MacOS/meshdrop-app" -verify_arch arm64 x86_64
           python3 scripts/packaging/launch.py "$app/Contents/MacOS/meshdrop-app"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:

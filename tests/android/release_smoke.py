@@ -15,17 +15,49 @@ SERIAL = 'emulator-5580'
 
 
 def adb(*arguments, timeout=30):
-    return subprocess.check_output([ADB, '-s', SERIAL, *arguments], timeout=timeout)
+    return subprocess.check_output([ADB, '-s', SERIAL, *arguments], timeout=timeout,
+                                   stderr=subprocess.PIPE)
+
+
+def process_pid(package):
+    """An absent process is empty; transport errors must still fail the test."""
+    try:
+        return adb('shell', 'pidof', package).strip()
+    except subprocess.CalledProcessError as error:
+        if error.returncode != 1 or error.stderr:
+            raise
+        return b''
+
+
+def app_pid():
+    """Keep a disappeared app distinct from a failed ADB connection."""
+    return process_pid(PACKAGE)
 
 
 def provider_pid():
     """A provider absent during first boot is transient; ADB failures still fail."""
-    try:
-        return adb('shell', 'pidof', 'com.google.android.gms.persistent').strip()
-    except subprocess.CalledProcessError as error:
-        if error.returncode != 1:
-            raise
-        return b''
+    return process_pid('com.google.android.gms.persistent')
+
+
+def failure_diagnostics(pid):
+    """Preserve kill reasons as well as crashes before destroying the private AVD."""
+    commands = [
+        ('crash buffer', ['logcat', '-b', 'crash', '-d']),
+        ('activity and process lifecycle', ['logcat', '-b', 'all', '-d', '-v',
+                                          'threadtime']),
+        ('last app exit', ['shell', 'dumpsys', 'activity', 'exit-info', PACKAGE]),
+    ]
+    for label, arguments in commands:
+        result = subprocess.run([ADB, '-s', SERIAL, *arguments], capture_output=True,
+                                text=True, timeout=30)
+        output = result.stdout
+        if label == 'activity and process lifecycle':
+            tokens = (PACKAGE, 'ActivityManager', 'ActivityTaskManager',
+                      'AndroidRuntime', 'lmkd', 'lowmemorykiller')
+            output = '\n'.join(line for line in output.splitlines()
+                               if any(token in line for token in tokens)
+                               or (pid and pid.decode() in line.split()))
+        print(f'=== {label} (exit {result.returncode}) ===\n{output}\n{result.stderr}', flush=True)
 
 
 def wait(check, seconds=180):
@@ -55,6 +87,7 @@ def launch(apk):
                 '-gpu', 'swangle', '-feature', '-Vulkan', '-memory', '2048',
                 '-cores', '2', '-accel', 'on'], env=environment, stdout=log,
                 stderr=subprocess.STDOUT)
+            pid = b''
             try:
                 def booted():
                     if process.poll() is not None:
@@ -85,16 +118,19 @@ def launch(apk):
                         adb('shell', 'dumpsys', 'activity', 'activities').decode(),
                         adb('shell', 'dumpsys', 'window').decode()) == PACKAGE + '.MainActivity'
                 wait(focused)
-                pid = adb('shell', 'pidof', PACKAGE).strip()
+                pid = app_pid()
                 time.sleep(15)
-                if not pid or adb('shell', 'pidof', PACKAGE).strip() != pid or not focused():
+                retained_pid = app_pid()
+                if not retained_pid:
+                    raise RuntimeError(f'Release app process gone during 15s retention; initial PID {pid.decode()}')
+                if not pid or retained_pid != pid or not focused():
                     raise RuntimeError('Release app did not retain its process and focused activity')
                 print(f'PASS: release APK installed, launched and retained focused MainActivity for 15s; PID {pid.decode()}', flush=True)
                 adb('shell', 'am', 'force-stop', PACKAGE)
             except Exception:
                 log.flush()
                 print((root / 'emulator.log').read_text()[-8000:], flush=True)
-                subprocess.run([ADB, '-s', SERIAL, 'logcat', '-b', 'crash', '-d'], timeout=20)
+                failure_diagnostics(pid)
                 raise
             finally:
                 # Terminate only the emulator process created by this test.
