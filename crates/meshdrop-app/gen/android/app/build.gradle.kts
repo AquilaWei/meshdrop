@@ -34,6 +34,23 @@ android {
         versionCode = workspaceVersionCode
         versionName = workspaceVersion
     }
+    // Signing material is supplied only through the environment, never properties files.
+    val releaseStore = System.getenv("MESHDROP_KEYSTORE_PATH")
+    gradle.taskGraph.whenReady {
+        require(releaseStore != null || allTasks.none {
+            it.project == project && it.name.endsWith("Release")
+        }) { "Release tasks require MESHDROP_KEYSTORE_PATH and signing environment variables" }
+    }
+    signingConfigs {
+        if (releaseStore != null) {
+            create("release") {
+                storeFile = file(releaseStore)
+                storePassword = requireNotNull(System.getenv("MESHDROP_KEYSTORE_PASSWORD"))
+                keyAlias = requireNotNull(System.getenv("MESHDROP_KEY_ALIAS"))
+                keyPassword = requireNotNull(System.getenv("MESHDROP_KEY_PASSWORD"))
+            }
+        }
+    }
     buildTypes {
         getByName("debug") {
             manifestPlaceholders["usesCleartextTraffic"] = "true"
@@ -47,6 +64,9 @@ android {
             }
         }
         getByName("release") {
+            if (releaseStore != null) {
+                signingConfig = signingConfigs.getByName("release")
+            }
             isMinifyEnabled = true
             proguardFiles(
                 *fileTree(".") { include("**/*.pro") }
