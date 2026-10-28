@@ -4,6 +4,80 @@
 public CA or Tailscale account required. The Rust core is shared by the CLI and
 Tauri desktop and Android apps. GPL-3.0-or-later; see [LICENSE](LICENSE).
 
+## Download and install
+
+Download the RPM (Linux x86_64), universal DMG (Apple Silicon and Intel macOS),
+or arm64 APK from [GitHub Releases](https://github.com/AquilaWei/meshdrop/releases).
+Download `SHA256SUMS` from the same release. Before installing, verify the file:
+
+```sh
+# Linux; checks downloaded files, ignoring installers for other platforms:
+sha256sum --ignore-missing --check SHA256SUMS
+# macOS (download all three installers for this command):
+shasum -a 256 --check SHA256SUMS
+# For an APK downloaded on Linux, use the first command above, then copy it to Android.
+```
+
+All downloaded files must report **OK**. Checksums detect corruption; obtain the
+installers and checksum file from the trusted repository release together.
+
+```sh
+# Fedora; replace VERSION with the release number shown on GitHub:
+sudo dnf install ./meshdrop-VERSION-x86_64.rpm
+meshdrop-app
+# macOS:
+open ./meshdrop-VERSION-universal.dmg
+# Drag meshdrop.app to Applications, then open it from Applications.
+# Android, with your own device selected in adb (or open the APK on the phone):
+adb install ./meshdrop-VERSION-arm64.apk
+```
+
+The DMG is **unsigned and not notarized**. If Gatekeeper blocks it, first try
+opening meshdrop in Applications, then go to **System Settings → Privacy &
+Security → Open Anyway** and confirm Open. On macOS versions that support it,
+Finder Control-click → Open also offers explicit approval. Do this only for a
+release you trust; do not disable Gatekeeper globally.
+
+The release APK and development debug APK have **different signing keys**.
+Uninstall the debug app before installing a release APK. **Uninstalling deletes
+app data, including pairing identities**; save needed app-private files first and
+pair all devices again after installing. Android public Download files are kept.
+Manual workflow artifacts contain `NOT-FOR-DISTRIBUTION` in their filenames and
+use temporary keys; they are validation artifacts, not upgrades or releases.
+
+## Release signing setup (maintainer)
+
+Run these commands yourself on your trusted machine. Keep the keystore outside
+this repository and back it up securely; losing it prevents compatible APK
+updates. Keytool prompts for the password, so no password is placed in shell
+history. This PKCS12 key uses the same store and key password.
+
+```sh
+mkdir -p "$HOME/.local/share/meshdrop-signing"
+chmod 700 "$HOME/.local/share/meshdrop-signing"
+keytool -genkeypair -storetype PKCS12 \
+  -keystore "$HOME/.local/share/meshdrop-signing/release.p12" \
+  -alias meshdrop-release -keyalg RSA -keysize 3072 -validity 10000 \
+  -dname 'CN=meshdrop release'
+chmod 600 "$HOME/.local/share/meshdrop-signing/release.p12"
+base64 < "$HOME/.local/share/meshdrop-signing/release.p12" | \
+  gh secret set ANDROID_KEYSTORE_BASE64 --repo AquilaWei/meshdrop
+gh secret set ANDROID_KEY_ALIAS --repo AquilaWei/meshdrop --body meshdrop-release
+# Each command prompts securely; enter the keytool password for both:
+gh secret set ANDROID_KEYSTORE_PASSWORD --repo AquilaWei/meshdrop
+gh secret set ANDROID_KEY_PASSWORD --repo AquilaWei/meshdrop
+```
+
+The tag workflow requires all four secrets. Never paste their values into an
+issue, chat or build log. Version metadata comes from the root `Cargo.toml`.
+The release workflow runs full desktop/Android CI, builds the three installers,
+launches the RPM under Xvfb and the mounted DMG on macOS, verifies APK metadata
+and signature, then creates `SHA256SUMS`. Release notes are extracted from the
+matching CHANGELOG section. A manual `gh workflow run release.yml --ref master`
+is a dry run and cannot create a Release. ARM64 APK emulator launch acceptance
+runs locally using the private `tests/android` AVD infrastructure; hosted x86_64
+Linux runners only verify the arm64 APK metadata and signature.
+
 ## Try it
 
 Install stable Rust with Cargo, then:

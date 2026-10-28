@@ -132,3 +132,21 @@ searching, connected, plus-first hint, invite modal, pairing and flat Settings.
 During a send the cancel target must be at least 44×44px and entirely outside the
 progress ring. A phone install/start/version/crash smoke does not establish these
 physical transfer checks. No 0.2.0 tag or release is authorized by this patch.
+
+## Installer acceptance before a release tag
+
+- Build the x86_64 RPM and inspect it with `rpm -qip`, `rpm -qlp` and
+  `rpm -i --test`. The workflow extracts it and checks its window under Xvfb.
+  A user performs the privileged Fedora installation:
+  `sudo dnf install ./meshdrop-0.2.0-x86_64.rpm`, then `meshdrop-app`.
+- The macOS dry-run runner must mount the universal DMG, verify both architectures,
+  launch the bundled app, confirm it stays running, then terminate it and unmount.
+  Gatekeeper approval, native notifications and file pickers remain physical checks.
+- Verify the release-signed arm64 APK using aapt and apksigner, then install and
+  launch it on an isolated test emulator using `tests/android` infrastructure.
+  Hosted x86_64 Linux does not execute the arm64 APK. Never use the user's AVD or phone.
+- Check the manual release workflow and all four ordinary push jobs at final HEAD.
+  The dry run must not create a Release. No tag or publication is authorized here.
+- Test upgrading release APKs with the same key separately; moving from debug to
+  release requires uninstalling (deleting app data) and pairing again. Temporary
+  dry-run keys cannot establish upgrade compatibility.
